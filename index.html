@@ -894,7 +894,7 @@ function renderKunden() {
 
   const suchfeld = state.kunden.length === 0 ? "" : `
       <input id="kunden-suche" type="text" placeholder="Kunde suchen…" value="${esc(kundenSuche)}"
-        oninput="kundenSuche=this.value; render();" onfocus="kundenSucheFokus=true" onblur="kundenSucheFokus=false"
+        oninput="kundenSuche=this.value; render();" onfocus="kundenSucheFokus=true"
         class="w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#f3ead3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e]" />`;
 
   const keinTreffer = suchbegriff && !ersterTrefferGesetzt;
