@@ -875,15 +875,16 @@ function summeProKunde(kundeId) {
 
 function renderKunden() {
   const suchbegriff = kundenSuche.trim().toLowerCase();
-  let ersterTrefferGesetzt = false;
+  const treffer = (k) => !!suchbegriff && k.name.toLowerCase().includes(suchbegriff);
+  const kundenSortiert = suchbegriff
+    ? [...state.kunden].sort((a, b) => (treffer(a) ? 0 : 1) - (treffer(b) ? 0 : 1))
+    : state.kunden;
 
-  const liste = state.kunden.map((k) => {
+  const liste = kundenSortiert.map((k) => {
     const s = summeProKunde(k.id);
-    const istTreffer = !!suchbegriff && k.name.toLowerCase().includes(suchbegriff);
-    const istErsterTreffer = istTreffer && !ersterTrefferGesetzt;
-    if (istErsterTreffer) ersterTrefferGesetzt = true;
+    const istTreffer = treffer(k);
     return `
-      <button id="kunde-zeile-${k.id}" ${istErsterTreffer ? 'data-erster-treffer="1"' : ""} onclick='openDialog({type:"kundeDetail", kundeId:"${k.id}"})' class="w-full text-left rounded-lg p-3.5 border flex items-center justify-between transition-colors ${istTreffer ? "bg-[#c96f3e]/20 border-[#c96f3e]" : "bg-[#f3ead3] border-[#2b1d13]/10"}">
+      <button id="kunde-zeile-${k.id}" onclick='openDialog({type:"kundeDetail", kundeId:"${k.id}"})' class="w-full text-left rounded-lg p-3.5 border flex items-center justify-between transition-colors ${istTreffer ? "bg-[#c96f3e]/20 border-[#c96f3e]" : "bg-[#f3ead3] border-[#2b1d13]/10"}">
         <div>
           <p class="font-medium">${esc(k.name)}</p>
           <p class="text-xs text-[#6b4a30] mt-0.5">${s.menge > 0 ? `${m3(s.menge)} · ${eur(s.preis)} insgesamt` : "Noch keine Lieferung"}</p>
@@ -897,7 +898,7 @@ function renderKunden() {
         oninput="kundenSuche=this.value; render();" onfocus="kundenSucheFokus=true"
         class="w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#f3ead3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e]" />`;
 
-  const keinTreffer = suchbegriff && !ersterTrefferGesetzt;
+  const keinTreffer = suchbegriff && !state.kunden.some(treffer);
 
   return `
     <div class="mt-2 space-y-3">
@@ -1241,10 +1242,6 @@ function nachRenderVerkabeln() {
       const len = suche.value.length;
       try { suche.setSelectionRange(len, len); } catch (e) {}
     }
-  }
-  if (kundenSuche.trim()) {
-    const treffer = document.querySelector('[data-erster-treffer="1"]');
-    if (treffer) treffer.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 }
 
