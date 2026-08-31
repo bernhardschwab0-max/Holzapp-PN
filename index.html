@@ -886,7 +886,7 @@ function renderKunden() {
     const s = summeProKunde(k.id);
     const istTreffer = treffer(k);
     return `
-      <button id="kunde-zeile-${k.id}" onclick='openDialog({type:"kundeDetail", kundeId:"${k.id}"})' class="w-full text-left rounded-lg p-3.5 border flex items-center justify-between transition-colors ${istTreffer ? "bg-[#c96f3e]/20 border-[#c96f3e]" : "bg-[#f3ead3] border-[#2b1d13]/10"}">
+      <button id="kunde-zeile-${k.id}" onclick='openDialog({type:"kundeDetail", kundeId:"${k.id}"})' class="w-full text-left rounded-lg p-3.5 border flex items-center justify-between transition-all ${istTreffer ? "bg-[#c96f3e]/30 border-[#c96f3e]" : "bg-[#f3ead3] border-[#2b1d13]/10"}">
         <div>
           <p class="font-medium">${esc(k.name)}</p>
           <p class="text-xs text-[#6b4a30] mt-0.5">${s.menge > 0 ? `${m3(s.menge)} · ${eur(s.preis)} insgesamt` : "Noch keine Lieferung"}</p>
@@ -958,7 +958,7 @@ function renderLieferungen() {
               <button onclick="lieferungLoeschen('${l.id}')" class="text-[#a62f2f] p-1.5">🗑</button>
             </div>
           </div>
-          ${l.notiz ? `<p class="text-xs text-[#6b4a30] bg-[#2b1d13]/5 rounded-lg px-2.5 py-1.5 mt-2">📝 ${esc(l.notiz)}</p>` : ""}
+          ${l.notiz ? `<p class="text-xs text-[#6b4a30] bg-[#2b1d13]/10 rounded-lg px-2.5 py-1.5 mt-2">📝 ${esc(l.notiz)}</p>` : ""}
           ${istAusgeliefert
             ? `<button onclick="lieferungAlsOffenMarkieren('${l.id}')" class="text-xs text-[#6b4a30] mt-2 underline">Ausgeliefert-Markierung zurücknehmen</button>`
             : `<button onclick="lieferungAlsAusgeliefertMarkieren('${l.id}')" class="w-full mt-2 text-xs bg-[#3e6b3e]/10 text-[#3e6b3e] border border-[#3e6b3e]/30 rounded-lg py-2 font-medium">✓ Als ausgeliefert markieren</button>`}
@@ -1169,7 +1169,7 @@ function renderDialog() {
     const kundenListe = kundenGeordnet.map((k) => {
       const istAusgewaehlt = dialog.kundeId === k.id;
       const istTreffer = kundeTreffer(k);
-      return `<button type="button" onclick="dialog.kundeId='${k.id}'; render();" class="w-full text-left px-3 py-2 text-sm border-b border-[#2b1d13]/10 last:border-b-0 ${istAusgewaehlt ? "bg-[#c96f3e]/20 font-medium" : istTreffer ? "bg-[#c96f3e]/10" : ""}">${esc(k.name)}</button>`;
+      return `<button type="button" onclick="dialog.kundeId='${k.id}'; render();" class="w-full text-left px-3 py-2 text-sm border-b border-[#2b1d13]/10 ${istAusgewaehlt ? "bg-[#c96f3e]/30 font-medium" : istTreffer ? "bg-[#c96f3e]/10" : ""}">${esc(k.name)}</button>`;
     }).join("");
     const preisAktuell = holzart === "hart" ? state.preisHart : state.preisWeich;
     const preisVoreinstellung = dialog.preisEingabe !== undefined ? dialog.preisEingabe : (preisAktuell > 0 ? String(preisAktuell).replace(".", ",") : "");
@@ -1184,8 +1184,8 @@ function renderDialog() {
       <div class="space-y-3">
         <div>
           <label class="text-xs text-[#6b4a30] block mb-1">Kunde</label>
-          <input id="l-kunde-suche" type="text" placeholder="Kunde suchen…" value="${esc(dialog.kundeSuche || "")}" onfocus="dialog.fokusId=this.id" oninput="dialog.kundeSuche=this.value; render();" class="w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e] mb-1.5" />
-          <div class="max-h-36 overflow-y-auto border border-[#2b1d13]/20 rounded-lg bg-[#e8ddc3]">${kundenListe}</div>
+          <input id="l-kunde-suche" type="text" placeholder="Kunde suchen…" value="${esc(dialog.kundeSuche || "")}" onfocus="dialog.fokusId=this.id" oninput="dialog.kundeSuche=this.value; render();" class="w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e] mb-2" />
+          <div class="max-h-40 overflow-y-auto border border-[#2b1d13]/20 rounded-lg bg-[#e8ddc3]">${kundenListe}</div>
         </div>
         <div>
           <label class="text-xs text-[#6b4a30] block mb-2">Holzart</label>
@@ -1225,7 +1225,7 @@ function renderDialog() {
 
   return `
     <div class="fixed inset-0 bg-black/40 z-30 flex items-end sm:items-center justify-center" onclick="if(event.target===this) closeDialog()">
-      <div class="bg-[#f3ead3] w-full sm:max-w-sm sm:rounded-xl rounded-t-2xl p-5 pb-6" onclick="event.stopPropagation()">
+      <div class="bg-[#f3ead3] w-full sm:max-w-sm sm:rounded-xl rounded-t-2xl p-5 pb-6" style="max-height:90vh;overflow-y:auto" onclick="event.stopPropagation()">
         <div class="flex items-center justify-between mb-4">
           <h3 class="f-head text-base">${esc(titel)}</h3>
           <button onclick="closeDialog()" class="text-[#6b4a30] text-lg leading-none">✕</button>
