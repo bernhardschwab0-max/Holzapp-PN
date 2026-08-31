@@ -643,7 +643,7 @@ function kundeLoeschen(id) {
   dialog = null;
   speichern();
 }
-async function lieferungHinzufuegen(kundeId, holzart, laenge, menge, preisProM3, lieferpreis, datum) {
+async function lieferungHinzufuegen(kundeId, holzart, laenge, menge, preisProM3, lieferpreis, datum, notiz) {
   const bestand = state.bestand[holzart][laenge] || 0;
   if (menge > bestand) {
     dialog.fehler = `Nicht genug ${holzartWort(holzart)} in ${laenge === "unsortiert" ? "Unsortiert" : laenge + "cm"} auf Lager (${m3(bestand)} verfügbar).`;
@@ -656,7 +656,7 @@ async function lieferungHinzufuegen(kundeId, holzart, laenge, menge, preisProM3,
     id: uid(), kundeId, holzart, laenge, menge, preisProM3, lieferpreis: round2(lieferpreis || 0),
     gesamtpreis: round2(holzpreis + (lieferpreis || 0)), datum, erstelltAm: new Date().toISOString(),
     status: "offen", ausgeliefertAm: null,
-    googleEventId: null,
+    googleEventId: null, notiz: notiz || "",
   };
   state.bestand[holzart][laenge] = round2(bestand - menge);
   state.lieferungen.push(neueLieferung);
@@ -686,7 +686,7 @@ function lieferungAlsOffenMarkieren(id) {
   l.ausgeliefertAm = null;
   speichern();
 }
-async function lieferungAktualisieren(id, kundeId, holzart, laenge, menge, preisProM3, lieferpreis, datum) {
+async function lieferungAktualisieren(id, kundeId, holzart, laenge, menge, preisProM3, lieferpreis, datum, notiz) {
   const l = state.lieferungen.find((x) => x.id === id);
   if (!l) return;
 
@@ -713,6 +713,7 @@ async function lieferungAktualisieren(id, kundeId, holzart, laenge, menge, preis
   l.lieferpreis = round2(lieferpreis || 0);
   l.gesamtpreis = round2(holzpreis + (lieferpreis || 0));
   l.datum = datum;
+  l.notiz = notiz || "";
 
   dialog = null;
   render();
@@ -956,6 +957,7 @@ function renderLieferungen() {
               <button onclick="lieferungLoeschen('${l.id}')" class="text-[#a62f2f] p-1.5">🗑</button>
             </div>
           </div>
+          ${l.notiz ? `<p class="text-xs text-[#6b4a30] bg-[#2b1d13]/5 rounded-lg px-2.5 py-1.5 mt-2">📝 ${esc(l.notiz)}</p>` : ""}
           ${istAusgeliefert
             ? `<button onclick="lieferungAlsOffenMarkieren('${l.id}')" class="text-xs text-[#6b4a30] mt-2 underline">Ausgeliefert-Markierung zurücknehmen</button>`
             : `<button onclick="lieferungAlsAusgeliefertMarkieren('${l.id}')" class="w-full mt-2 text-xs bg-[#3e6b3e]/10 text-[#3e6b3e] border border-[#3e6b3e]/30 rounded-lg py-2 font-medium">✓ Als ausgeliefert markieren</button>`}
@@ -1193,6 +1195,7 @@ function renderDialog() {
           <input id="l-lieferpreis" inputmode="decimal" placeholder="0,00" value="${dialog.lieferpreisEingabe || ""}" onfocus="dialog.fokusId=this.id" oninput="dialog.lieferpreisEingabe=this.value; render();" class="f-num w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e]" />
         </div>
         <div><label class="text-xs text-[#6b4a30] block mb-1">Liefertermin</label><input id="l-datum" type="date" value="${dialog.datumEingabe || heute()}" oninput="dialog.datumEingabe=this.value" class="w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e]" /></div>
+        <div><label class="text-xs text-[#6b4a30] block mb-1">Notiz (optional)</label><textarea id="l-notiz" rows="2" placeholder="z.B. Zufahrt, Ablageort, Absprache …" onfocus="dialog.fokusId=this.id" oninput="dialog.notizEingabe=this.value" class="w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e] resize-none">${esc(dialog.notizEingabe || "")}</textarea></div>
         ${dialog.fehler ? `<p class="text-xs text-[#a62f2f]">${esc(dialog.fehler)}</p>` : ""}
         ${(() => {
           const mengeNum = parseFloat(String(dialog.mengeEingabe || "").replace(",", "."));
@@ -1301,11 +1304,12 @@ function bestaetigeLieferung() {
   const lieferpreisRoh = document.getElementById("l-lieferpreis").value.trim();
   const lieferpreis = lieferpreisRoh === "" ? 0 : parseFloat(lieferpreisRoh.replace(",", "."));
   const datum = document.getElementById("l-datum").value;
+  const notiz = document.getElementById("l-notiz").value.trim();
   if (!kundeId || !Number.isFinite(menge) || menge <= 0 || !Number.isFinite(preis) || preis <= 0 || !Number.isFinite(lieferpreis) || lieferpreis < 0 || !datum) return;
   if (dialog.bearbeitenId) {
-    lieferungAktualisieren(dialog.bearbeitenId, kundeId, holzart, laenge, menge, preis, lieferpreis, datum);
+    lieferungAktualisieren(dialog.bearbeitenId, kundeId, holzart, laenge, menge, preis, lieferpreis, datum, notiz);
   } else {
-    lieferungHinzufuegen(kundeId, holzart, laenge, menge, preis, lieferpreis, datum);
+    lieferungHinzufuegen(kundeId, holzart, laenge, menge, preis, lieferpreis, datum, notiz);
   }
 }
 
@@ -1322,6 +1326,7 @@ function lieferungBearbeiten(id) {
     preisEingabe: String(l.preisProM3).replace(".", ","),
     lieferpreisEingabe: l.lieferpreis > 0 ? String(l.lieferpreis).replace(".", ",") : "",
     datumEingabe: l.datum,
+    notizEingabe: l.notiz || "",
   });
 }
 
