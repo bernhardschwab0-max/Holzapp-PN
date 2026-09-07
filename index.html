@@ -633,6 +633,11 @@ function holzEinlagern(menge, holzart, laenge) {
   dialog = null;
   speichern();
 }
+function bestandKorrigieren(holzart, laenge, neueMenge) {
+  state.bestand[holzart][laenge] = round2(neueMenge);
+  dialog = null;
+  speichern();
+}
 function kundeHinzufuegen(name, telefon, adresse) {
   state.kunden.push({ id: uid(), name, telefon, adresse });
   dialog = null;
@@ -815,15 +820,16 @@ function render() {
   nachRenderVerkabeln();
 }
 
-function laengenZeile(bezeichnung, wert, max, farbe) {
+function laengenZeile(bezeichnung, wert, max, farbe, onClick) {
   const prozent = Math.max(4, Math.min(100, (wert / max) * 100));
   return `
-    <div class="flex items-center gap-2">
+    <div class="flex items-center gap-2"${onClick ? ` onclick="${onClick}" style="cursor:pointer"` : ""}>
       <span class="text-xs text-[#6b4a30] w-16 shrink-0">${bezeichnung}</span>
       <div class="h-2.5 rounded-full bg-[#2b1d13]/10 overflow-hidden plank flex-1">
         <div class="h-full rounded-full transition-all duration-500" style="width:${prozent}%; background-color:${farbe};"></div>
       </div>
       <span class="f-num text-xs w-16 text-right shrink-0">${m3(wert)}</span>
+      ${onClick ? `<span class="text-xs text-[#6b4a30] shrink-0">✎</span>` : ""}
     </div>`;
 }
 
@@ -832,8 +838,9 @@ function holzartKarte(holzart, label, farbe, icon, feld) {
   const gesamt = gesamtMenge(bestand);
   const preis = state[feld] || 0;
   const maxLaenge = Math.max(...LAENGEN.map((l) => bestand[l] || 0), bestand.unsortiert || 0, 1);
-  const zeilen = LAENGEN.map((l) => laengenZeile(`${l} cm`, bestand[l] || 0, maxLaenge, farbe)).join("");
-  const unsortiertZeile = bestand.unsortiert > 0 ? laengenZeile("Unsortiert", bestand.unsortiert, maxLaenge, "#8a6a3f") : "";
+  const korrigierenClick = (l) => `openDialog({type:'korrigieren', holzart:'${holzart}', laenge:'${l}', holzartLabel:'${esc(label)}'})`;
+  const zeilen = LAENGEN.map((l) => laengenZeile(`${l} cm`, bestand[l] || 0, maxLaenge, farbe, korrigierenClick(l))).join("");
+  const unsortiertZeile = bestand.unsortiert > 0 ? laengenZeile("Unsortiert", bestand.unsortiert, maxLaenge, "#8a6a3f", korrigierenClick("unsortiert")) : "";
   return `
     <div class="bg-[#f3ead3] rounded-lg p-4 border border-[#2b1d13]/10">
       <div class="flex items-center justify-between mb-3">
@@ -1038,6 +1045,17 @@ function renderDialog() {
       <button onclick="bestaetigeEinlagern()" class="w-full bg-[#c96f3e] text-[#2b1d13] rounded-lg py-3 text-sm font-medium">Einlagern</button>`;
   }
 
+  if (dialog.type === "korrigieren") {
+    const aktuell = state.bestand[dialog.holzart][dialog.laenge] || 0;
+    const laengeLabel = dialog.laenge === "unsortiert" ? "Unsortiert" : `${dialog.laenge} cm`;
+    titel = "Bestand korrigieren";
+    body = `
+      <p class="text-xs text-[#6b4a30] mb-3">${esc(dialog.holzartLabel)} · ${laengeLabel} — bisher: ${m3(aktuell)}</p>
+      <label class="text-sm text-[#4a3626] block mb-1">Neue Menge (m³)</label>
+      <input id="eingabe-korrektur" inputmode="decimal" placeholder="0,00" value="${String(aktuell).replace(".", ",")}" class="f-num w-full text-2xl border border-[#2b1d13]/20 rounded-lg px-3 py-2 mb-3 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e]" />
+      <button onclick="bestaetigeKorrektur()" class="w-full bg-[#c96f3e] text-[#2b1d13] rounded-lg py-3 text-sm font-medium">Bestand speichern</button>`;
+  }
+
   if (dialog.type === "preis") {
     const aktuell = state[dialog.feld] || 0;
     titel = `Preis: ${dialog.label}`;
@@ -1240,6 +1258,8 @@ function nachRenderVerkabeln() {
   if (menge) menge.focus();
   const preis = document.getElementById("eingabe-preis");
   if (preis) { preis.focus(); preis.select(); }
+  const korrektur = document.getElementById("eingabe-korrektur");
+  if (korrektur) { korrektur.focus(); korrektur.select(); }
   if (dialog && dialog.fokusId) {
     const el = document.getElementById(dialog.fokusId);
     if (el) {
@@ -1285,6 +1305,11 @@ function bestaetigeEinlagern() {
   const v = parseFloat(document.getElementById("eingabe-menge").value.replace(",", "."));
   if (!Number.isFinite(v) || v <= 0) return;
   holzEinlagern(v, dialog.ziel || "hart", dialog.laenge || "25");
+}
+function bestaetigeKorrektur() {
+  const v = parseFloat(document.getElementById("eingabe-korrektur").value.replace(",", "."));
+  if (!Number.isFinite(v) || v < 0) return;
+  bestandKorrigieren(dialog.holzart, dialog.laenge, v);
 }
 function bestaetigePreis() {
   const v = parseFloat(document.getElementById("eingabe-preis").value.replace(",", "."));
