@@ -836,8 +836,8 @@ function laengenZeile(bezeichnung, wert, max, farbe, holzart, laenge, holzartLab
         <div class="h-full rounded-full transition-all duration-500" style="width:${prozent}%; background-color:${farbe};"></div>
       </div>
       <span class="f-num text-xs w-16 text-right shrink-0">${m3(wert)}</span>
-      <button onclick="event.stopPropagation(); bestandAnpassen('${holzart}','${laenge}',-1)" class="f-num w-8 h-8 rounded-full border border-[#2b1d13]/15 text-[#4a3626] font-semibold shrink-0" style="line-height:1">−</button>
-      <button onclick="event.stopPropagation(); bestandAnpassen('${holzart}','${laenge}',1)" class="f-num w-8 h-8 rounded-full border border-[#2b1d13]/15 text-[#4a3626] font-semibold shrink-0" style="line-height:1">+</button>
+      <button onclick="event.stopPropagation(); bestandAnpassen('${holzart}','${laenge}',-0.5)" class="f-num w-8 h-8 rounded-full border border-[#2b1d13]/15 text-[#4a3626] font-semibold shrink-0" style="line-height:1">−</button>
+      <button onclick="event.stopPropagation(); bestandAnpassen('${holzart}','${laenge}',0.5)" class="f-num w-8 h-8 rounded-full border border-[#2b1d13]/15 text-[#4a3626] font-semibold shrink-0" style="line-height:1">+</button>
     </div>`;
 }
 
