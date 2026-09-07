@@ -638,6 +638,12 @@ function bestandKorrigieren(holzart, laenge, neueMenge) {
   dialog = null;
   speichern();
 }
+function bestandAnpassen(holzart, laenge, delta) {
+  const aktuell = state.bestand[holzart][laenge] || 0;
+  state.bestand[holzart][laenge] = Math.max(0, round2(aktuell + delta));
+  render();
+  speichern();
+}
 function kundeHinzufuegen(name, telefon, adresse) {
   state.kunden.push({ id: uid(), name, telefon, adresse });
   dialog = null;
@@ -820,16 +826,18 @@ function render() {
   nachRenderVerkabeln();
 }
 
-function laengenZeile(bezeichnung, wert, max, farbe, onClick) {
+function laengenZeile(bezeichnung, wert, max, farbe, holzart, laenge, holzartLabel) {
   const prozent = Math.max(4, Math.min(100, (wert / max) * 100));
+  const openKorrektur = `openDialog({type:'korrigieren', holzart:'${holzart}', laenge:'${laenge}', holzartLabel:'${esc(holzartLabel)}'})`;
   return `
-    <div class="flex items-center gap-2"${onClick ? ` onclick="${onClick}" style="cursor:pointer"` : ""}>
+    <div class="flex items-center gap-2" onclick="${openKorrektur}" style="cursor:pointer">
       <span class="text-xs text-[#6b4a30] w-16 shrink-0">${bezeichnung}</span>
       <div class="h-2.5 rounded-full bg-[#2b1d13]/10 overflow-hidden plank flex-1">
         <div class="h-full rounded-full transition-all duration-500" style="width:${prozent}%; background-color:${farbe};"></div>
       </div>
       <span class="f-num text-xs w-16 text-right shrink-0">${m3(wert)}</span>
-      ${onClick ? `<span class="text-xs text-[#6b4a30] shrink-0">✎</span>` : ""}
+      <button onclick="event.stopPropagation(); bestandAnpassen('${holzart}','${laenge}',-1)" class="f-num w-8 h-8 rounded-full border border-[#2b1d13]/15 text-[#4a3626] font-semibold shrink-0" style="line-height:1">−</button>
+      <button onclick="event.stopPropagation(); bestandAnpassen('${holzart}','${laenge}',1)" class="f-num w-8 h-8 rounded-full border border-[#2b1d13]/15 text-[#4a3626] font-semibold shrink-0" style="line-height:1">+</button>
     </div>`;
 }
 
@@ -838,9 +846,8 @@ function holzartKarte(holzart, label, farbe, icon, feld) {
   const gesamt = gesamtMenge(bestand);
   const preis = state[feld] || 0;
   const maxLaenge = Math.max(...LAENGEN.map((l) => bestand[l] || 0), bestand.unsortiert || 0, 1);
-  const korrigierenClick = (l) => `openDialog({type:'korrigieren', holzart:'${holzart}', laenge:'${l}', holzartLabel:'${esc(label)}'})`;
-  const zeilen = LAENGEN.map((l) => laengenZeile(`${l} cm`, bestand[l] || 0, maxLaenge, farbe, korrigierenClick(l))).join("");
-  const unsortiertZeile = bestand.unsortiert > 0 ? laengenZeile("Unsortiert", bestand.unsortiert, maxLaenge, "#8a6a3f", korrigierenClick("unsortiert")) : "";
+  const zeilen = LAENGEN.map((l) => laengenZeile(`${l} cm`, bestand[l] || 0, maxLaenge, farbe, holzart, l, label)).join("");
+  const unsortiertZeile = bestand.unsortiert > 0 ? laengenZeile("Unsortiert", bestand.unsortiert, maxLaenge, "#8a6a3f", holzart, "unsortiert", label) : "";
   return `
     <div class="bg-[#f3ead3] rounded-lg p-4 border border-[#2b1d13]/10">
       <div class="flex items-center justify-between mb-3">
