@@ -351,6 +351,8 @@ let state = leererZustand();
 let tab = "bestand";
 let dialog = null; // { type, ... }
 let filterLieferungen = "anstehend";
+let lieferungenSuche = "";
+let lieferungenSucheFokus = false;
 let kundenSuche = "";
 let kundenSucheFokus = false;
 let sicherungsListe = null; // null = noch nicht geladen
@@ -932,6 +934,15 @@ function renderLieferungen() {
   if (filterLieferungen === "ausgeliefert") gefiltert = gefiltert.filter((l) => l.status === "ausgeliefert");
   gefiltert.sort((a, b) => a.datum.localeCompare(b.datum));
 
+  const anzahlVorSuche = gefiltert.length;
+  const suchbegriff = lieferungenSuche.trim().toLowerCase();
+  if (suchbegriff) {
+    gefiltert = gefiltert.filter((l) => {
+      const kunde = state.kunden.find((k) => k.id === l.kundeId);
+      return (kunde?.name || "").toLowerCase().includes(suchbegriff);
+    });
+  }
+
   const karten = gefiltert.map((l) => {
     const kunde = state.kunden.find((k) => k.id === l.kundeId);
     const istHart = l.holzart === "hart";
@@ -986,8 +997,12 @@ function renderLieferungen() {
           <button onclick="filterLieferungen='${id}'; render();" class="text-xs px-3 py-1.5 rounded-full border ${filterLieferungen === id ? "bg-[#c96f3e] border-[#c96f3e] font-medium" : "border-[#2b1d13]/20 text-[#6b4a30]"}">${label}</button>
         `).join("")}
       </div>
+      ${anzahlVorSuche > 0 ? `<input id="lieferungen-suche" type="text" placeholder="Kunde suchen…" value="${esc(lieferungenSuche)}"
+        oninput="lieferungenSuche=this.value; render();" onfocus="lieferungenSucheFokus=true"
+        class="w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#f3ead3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e]" />` : ""}
       ${state.kunden.length === 0 ? leererHinweis("Leg zuerst einen Kunden an, bevor du eine Lieferung einträgst.") : ""}
-      ${state.kunden.length > 0 && gefiltert.length === 0 ? leererHinweis("Keine Lieferungen in dieser Ansicht.") : ""}
+      ${state.kunden.length > 0 && anzahlVorSuche > 0 && gefiltert.length === 0 ? leererHinweis(`Kein Kunde gefunden für "${esc(lieferungenSuche.trim())}".`) : ""}
+      ${state.kunden.length > 0 && anzahlVorSuche === 0 ? leererHinweis("Keine Lieferungen in dieser Ansicht.") : ""}
       <div class="space-y-3">${karten}</div>
     </div>`;
 }
@@ -1262,6 +1277,14 @@ function nachRenderVerkabeln() {
   }
   if (kundenSucheFokus) {
     const suche = document.getElementById("kunden-suche");
+    if (suche) {
+      suche.focus();
+      const len = suche.value.length;
+      try { suche.setSelectionRange(len, len); } catch (e) {}
+    }
+  }
+  if (lieferungenSucheFokus) {
+    const suche = document.getElementById("lieferungen-suche");
     if (suche) {
       suche.focus();
       const len = suche.value.length;
