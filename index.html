@@ -272,7 +272,7 @@ const firebaseConfig = {
   ====================================================================
 -->
 <script>
-const GOOGLE_CLIENT_ID = "DEINE_CLIENT_ID.apps.googleusercontent.com";
+const GOOGLE_CLIENT_ID = "263331327726-dvqmlpkele3bcv2197qrtq6l4o1j4qg3.apps.googleusercontent.com";
 </script>
 
 <div id="app"></div>
@@ -1224,12 +1224,12 @@ function renderDialog() {
           ${unsortiertVerfuegbar > 0 ? `<button onclick="setLieferungLaenge('unsortiert')" class="w-full mt-2 py-2 rounded-lg text-xs border-2 ${laenge === "unsortiert" ? "border-[#c96f3e] bg-[#c96f3e]/10 font-medium" : "border-[#2b1d13]/15 text-[#6b4a30]"}">Unsortiert (alter Bestand) · ${m3(unsortiertVerfuegbar)}</button>` : ""}
         </div>
         <div class="grid grid-cols-2 gap-3">
-          <div><label class="text-xs text-[#6b4a30] block mb-1">Menge (m³)</label><input id="l-menge" inputmode="decimal" placeholder="0,00" value="${dialog.mengeEingabe || ""}" onfocus="dialog.fokusId=this.id" oninput="dialog.mengeEingabe=this.value; render();" class="f-num w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e]" /></div>
-          <div><label class="text-xs text-[#6b4a30] block mb-1">Preis/m³ (€)</label><input id="l-preis" inputmode="decimal" placeholder="0,00" value="${preisVoreinstellung}" onfocus="dialog.fokusId=this.id" oninput="dialog.preisEingabe=this.value; render();" class="f-num w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e]" /></div>
+          <div><label class="text-xs text-[#6b4a30] block mb-1">Menge (m³)</label><input id="l-menge" inputmode="decimal" placeholder="0,00" value="${dialog.mengeEingabe || ""}" onfocus="dialog.fokusId=this.id" oninput="dialog.mengeEingabe=this.value" onblur="render()" class="f-num w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e]" /></div>
+          <div><label class="text-xs text-[#6b4a30] block mb-1">Preis/m³ (€)</label><input id="l-preis" inputmode="decimal" placeholder="0,00" value="${preisVoreinstellung}" onfocus="dialog.fokusId=this.id" oninput="dialog.preisEingabe=this.value" onblur="render()" class="f-num w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e]" /></div>
         </div>
         <div>
           <label class="text-xs text-[#6b4a30] block mb-1">Lieferpreis (€, frei wählbar)</label>
-          <input id="l-lieferpreis" inputmode="decimal" placeholder="0,00" value="${dialog.lieferpreisEingabe || ""}" onfocus="dialog.fokusId=this.id" oninput="dialog.lieferpreisEingabe=this.value; render();" class="f-num w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e]" />
+          <input id="l-lieferpreis" inputmode="decimal" placeholder="0,00" value="${dialog.lieferpreisEingabe || ""}" onfocus="dialog.fokusId=this.id" oninput="dialog.lieferpreisEingabe=this.value" onblur="render()" class="f-num w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e]" />
         </div>
         <div><label class="text-xs text-[#6b4a30] block mb-1">Liefertermin</label><input id="l-datum" type="date" value="${dialog.datumEingabe || heute()}" oninput="dialog.datumEingabe=this.value" class="w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e]" /></div>
         <div><label class="text-xs text-[#6b4a30] block mb-1">Notiz (optional)</label><textarea id="l-notiz" rows="2" placeholder="z.B. Zufahrt, Ablageort, Absprache …" onfocus="dialog.fokusId=this.id" oninput="dialog.notizEingabe=this.value" class="w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e] resize-none">${esc(dialog.notizEingabe || "")}</textarea></div>
