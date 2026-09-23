@@ -410,11 +410,32 @@ function ensureGoogleToken() {
 
 let letzterGoogleFehler = "";
 
+// Google Kalender kennt nur diese 11 festen Event-Farben (colorId 1-11).
+const GOOGLE_FARBEN = [
+  { id: "1", name: "Lavendel", hex: "#7986cb" },
+  { id: "2", name: "Salbei", hex: "#33b679" },
+  { id: "3", name: "Traube", hex: "#8e24aa" },
+  { id: "4", name: "Flamingo", hex: "#e67c73" },
+  { id: "5", name: "Banane", hex: "#f6bf26" },
+  { id: "6", name: "Mandarine", hex: "#f4511e" },
+  { id: "7", name: "Pfau", hex: "#039be5" },
+  { id: "8", name: "Graphit", hex: "#616161" },
+  { id: "9", name: "Heidelbeere", hex: "#3f51b5" },
+  { id: "10", name: "Basilikum", hex: "#0b8043" },
+  { id: "11", name: "Tomate", hex: "#d50000" },
+];
+
+function googleEventZeiten(l) {
+  const uhrzeit = l.kalenderUhrzeit || "09:00";
+  const dStart = new Date(`${l.datum}T${uhrzeit}:00`);
+  const dEnd = new Date(dStart.getTime() + 60 * 60 * 1000);
+  return { dStart, dEnd };
+}
+
 async function erstelleGoogleEvent(l, kunde) {
   const token = await ensureGoogleToken();
   if (!token) { letzterGoogleFehler = "Keine gültige Google-Anmeldung (bitte oben neu verbinden)."; return null; }
-  const dStart = new Date(l.datum + "T09:00:00");
-  const dEnd = new Date(l.datum + "T10:00:00");
+  const { dStart, dEnd } = googleEventZeiten(l);
   const body = {
     summary: `Holzlieferung: ${kunde?.name || "Kunde"}`,
     location: kunde?.adresse || "",
@@ -422,6 +443,7 @@ async function erstelleGoogleEvent(l, kunde) {
     start: { dateTime: dStart.toISOString() },
     end: { dateTime: dEnd.toISOString() },
   };
+  if (l.kalenderFarbe) body.colorId = l.kalenderFarbe;
   try {
     const res = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
       method: "POST",
@@ -457,14 +479,14 @@ async function aktualisiereGoogleEvent(l, kunde) {
   if (!l.googleEventId) return false;
   const token = await ensureGoogleToken();
   if (!token) { letzterGoogleFehler = "Keine gültige Google-Anmeldung (bitte oben neu verbinden)."; return false; }
-  const dStart = new Date(l.datum + "T09:00:00");
-  const dEnd = new Date(l.datum + "T10:00:00");
+  const { dStart, dEnd } = googleEventZeiten(l);
   const body = {
     summary: `Holzlieferung: ${kunde?.name || "Kunde"}`,
     location: kunde?.adresse || "",
     description: `${holzartLabel(l)}: ${m3(l.menge)}\nPreis: ${eur(l.gesamtpreis)} (${eur(l.preisProM3)}/m³${l.lieferpreis > 0 ? ` + ${eur(l.lieferpreis)} Lieferung` : ""})\nTelefon: ${kunde?.telefon || "-"}`,
     start: { dateTime: dStart.toISOString() },
     end: { dateTime: dEnd.toISOString() },
+    colorId: l.kalenderFarbe || "",
   };
   try {
     const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${l.googleEventId}`, {
@@ -484,13 +506,23 @@ async function aktualisiereGoogleEvent(l, kunde) {
 
 // Wird über den "Kalender"-Button bei einer Lieferung ausgelöst: trägt den Termin
 // direkt per Google-Kalender-API ein, ganz ohne Link/App-Umweg (unabhängig vom Handy).
-async function kalenderEintragErstellen(id) {
-  const l = state.lieferungen.find((x) => x.id === id);
-  if (!l) return;
+function kalenderDialogOeffnen(id) {
   if (!googleToken && !tokenClient) {
     alert('Bitte zuerst oben auf "Mit Google Kalender verbinden" tippen.');
     return;
   }
+  openDialog({ type: "kalenderEintrag", lieferungId: id });
+}
+
+async function bestaetigeKalenderEintrag() {
+  const l = state.lieferungen.find((x) => x.id === dialog.lieferungId);
+  if (!l) { dialog = null; render(); return; }
+  const uhrzeitEl = document.getElementById("kalender-uhrzeit");
+  l.kalenderUhrzeit = (uhrzeitEl && uhrzeitEl.value) || "09:00";
+  l.kalenderFarbe = dialog.farbeAuswahl !== undefined ? dialog.farbeAuswahl : (l.kalenderFarbe || "");
+  dialog = null;
+  render();
+
   const kunde = state.kunden.find((k) => k.id === l.kundeId);
   letzterGoogleFehler = "";
   let erfolg;
@@ -501,12 +533,11 @@ async function kalenderEintragErstellen(id) {
     erfolg = !!eventId;
     if (eventId) l.googleEventId = eventId;
   }
-  if (!erfolg) {
-    alert("Eintrag konnte nicht im Kalender gespeichert werden." + (letzterGoogleFehler ? "\n\nGrund: " + letzterGoogleFehler : ""));
-    return;
-  }
   render();
   await speichern();
+  if (!erfolg) {
+    alert("Eintrag konnte nicht im Kalender gespeichert werden." + (letzterGoogleFehler ? "\n\nGrund: " + letzterGoogleFehler : ""));
+  }
 }
 
 /* ======================= Firebase ======================= */
@@ -1002,7 +1033,7 @@ function renderLieferungen() {
               <p class="text-xs text-[#6b4a30]">${eur(l.preisProM3)}/m³${l.lieferpreis > 0 ? ` · +${eur(l.lieferpreis)} Lieferung` : ""} · <span class="font-semibold">${eur(l.gesamtpreis)}</span></p>
             </div>
             <div class="flex gap-2">
-              <button onclick="kalenderEintragErstellen('${l.id}')" class="text-xs flex items-center gap-1 ${l.googleEventId ? "bg-[#3e6b3e]/10 text-[#3e6b3e] border border-[#3e6b3e]/30" : "bg-[#2b1d13] text-[#e8ddc3]"} rounded-full px-2.5 py-1.5">${l.googleEventId ? "✓ Im Kalender" : "📅 Kalender"}</button>
+              <button onclick="kalenderDialogOeffnen('${l.id}')" class="text-xs flex items-center gap-1 ${l.googleEventId ? "bg-[#3e6b3e]/10 text-[#3e6b3e] border border-[#3e6b3e]/30" : "bg-[#2b1d13] text-[#e8ddc3]"} rounded-full px-2.5 py-1.5">${l.googleEventId ? "✓ Im Kalender" : "📅 Kalender"}</button>
               <button onclick="lieferungBearbeiten('${l.id}')" class="text-xs flex items-center gap-1 border border-[#2b1d13]/20 text-[#4a3626] rounded-full px-2.5 py-1.5">✎ Bearbeiten</button>
               <button onclick="lieferungLoeschen('${l.id}')" class="text-[#a62f2f] p-1.5">🗑</button>
             </div>
@@ -1095,6 +1126,34 @@ function renderDialog() {
       <label class="text-sm text-[#4a3626] block mb-2">Länge</label>
       <div class="grid grid-cols-4 gap-2 mb-4">${LAENGEN.map(laengeBtn).join("")}</div>
       <button onclick="bestaetigeEinlagern()" class="w-full bg-[#c96f3e] text-[#2b1d13] rounded-lg py-3 text-sm font-medium">${dialog.modus === "abziehen" ? "Abziehen" : "Einlagern"}</button>`;
+  }
+
+  if (dialog.type === "kalenderEintrag") {
+    const l = state.lieferungen.find((x) => x.id === dialog.lieferungId);
+    if (!l) { dialog = null; return ""; }
+    const kunde = state.kunden.find((k) => k.id === l.kundeId);
+    const uhrzeit = l.kalenderUhrzeit || "09:00";
+    const farbeAktuell = dialog.farbeAuswahl !== undefined ? dialog.farbeAuswahl : (l.kalenderFarbe || "");
+    titel = `${l.googleEventId ? "Kalendereintrag bearbeiten" : "Im Kalender eintragen"} · ${esc(kunde?.name || "Kunde")}`;
+    const standardSwatch = `
+      <button type="button" onclick="dialog.farbeAuswahl=''; render();" title="Standardfarbe"
+        class="w-9 h-9 rounded-full flex items-center justify-center text-xs text-[#6b4a30]"
+        style="background:transparent; border:2px ${farbeAktuell === "" ? "solid #2b1d13" : "dashed #6b4a30"}">–</button>`;
+    const swatches = GOOGLE_FARBEN.map((f) => `
+      <button type="button" onclick="dialog.farbeAuswahl='${f.id}'; render();" title="${f.name}"
+        class="w-9 h-9 rounded-full" style="background-color:${f.hex}; border:3px solid ${farbeAktuell === f.id ? "#2b1d13" : "transparent"}"></button>`).join("");
+    body = `
+      <div class="space-y-3">
+        <div>
+          <label class="text-sm text-[#4a3626] block mb-1">Uhrzeit</label>
+          <input id="kalender-uhrzeit" type="time" value="${uhrzeit}" class="w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e]" />
+        </div>
+        <div>
+          <label class="text-sm text-[#4a3626] block mb-2">Farbe (optional)</label>
+          <div class="flex flex-wrap gap-2">${standardSwatch}${swatches}</div>
+        </div>
+      </div>
+      <button onclick="bestaetigeKalenderEintrag()" class="w-full mt-4 bg-[#c96f3e] text-[#2b1d13] rounded-lg py-3 text-sm font-medium">✓ Im Kalender speichern</button>`;
   }
 
   if (dialog.type === "preis") {
