@@ -408,9 +408,11 @@ function ensureGoogleToken() {
   });
 }
 
+let letzterGoogleFehler = "";
+
 async function erstelleGoogleEvent(l, kunde) {
   const token = await ensureGoogleToken();
-  if (!token) return null;
+  if (!token) { letzterGoogleFehler = "Keine gültige Google-Anmeldung (bitte oben neu verbinden)."; return null; }
   const dStart = new Date(l.datum + "T09:00:00");
   const dEnd = new Date(l.datum + "T10:00:00");
   const body = {
@@ -426,11 +428,13 @@ async function erstelleGoogleEvent(l, kunde) {
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
     const data = await res.json();
+    letzterGoogleFehler = "";
     return data.id;
   } catch (e) {
     console.error("Google Kalender Fehler:", e);
+    letzterGoogleFehler = e.message || String(e);
     return null;
   }
 }
@@ -450,9 +454,9 @@ async function loescheGoogleEvent(eventId) {
 }
 
 async function aktualisiereGoogleEvent(l, kunde) {
-  if (!l.googleEventId) return;
+  if (!l.googleEventId) return false;
   const token = await ensureGoogleToken();
-  if (!token) return;
+  if (!token) { letzterGoogleFehler = "Keine gültige Google-Anmeldung (bitte oben neu verbinden)."; return false; }
   const dStart = new Date(l.datum + "T09:00:00");
   const dEnd = new Date(l.datum + "T10:00:00");
   const body = {
@@ -463,13 +467,18 @@ async function aktualisiereGoogleEvent(l, kunde) {
     end: { dateTime: dEnd.toISOString() },
   };
   try {
-    await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${l.googleEventId}`, {
+    const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${l.googleEventId}`, {
       method: "PATCH",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
+    if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+    letzterGoogleFehler = "";
+    return true;
   } catch (e) {
     console.error("Google Kalender Aktualisieren fehlgeschlagen:", e);
+    letzterGoogleFehler = e.message || String(e);
+    return false;
   }
 }
 
@@ -483,15 +492,18 @@ async function kalenderEintragErstellen(id) {
     return;
   }
   const kunde = state.kunden.find((k) => k.id === l.kundeId);
+  letzterGoogleFehler = "";
+  let erfolg;
   if (l.googleEventId) {
-    await aktualisiereGoogleEvent(l, kunde);
+    erfolg = await aktualisiereGoogleEvent(l, kunde);
   } else {
     const eventId = await erstelleGoogleEvent(l, kunde);
-    if (!eventId) {
-      alert("Eintrag konnte nicht im Kalender gespeichert werden. Bitte prüfe die Verbindung mit Google Kalender.");
-      return;
-    }
-    l.googleEventId = eventId;
+    erfolg = !!eventId;
+    if (eventId) l.googleEventId = eventId;
+  }
+  if (!erfolg) {
+    alert("Eintrag konnte nicht im Kalender gespeichert werden." + (letzterGoogleFehler ? "\n\nGrund: " + letzterGoogleFehler : ""));
+    return;
   }
   render();
   await speichern();
