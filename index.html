@@ -432,6 +432,12 @@ function googleEventZeiten(l) {
   return { dStart, dEnd };
 }
 
+function googleEventBeschreibung(l, kunde) {
+  let text = `${holzartLabel(l)}: ${m3(l.menge)}\nPreis: ${eur(l.gesamtpreis)} (${eur(l.preisProM3)}/m³${l.lieferpreis > 0 ? ` + ${eur(l.lieferpreis)} Lieferung` : ""})\nTelefon: ${kunde?.telefon || "-"}`;
+  if (l.kalenderAnmerkung) text += `\nAnmerkung: ${l.kalenderAnmerkung}`;
+  return text;
+}
+
 async function erstelleGoogleEvent(l, kunde) {
   const token = await ensureGoogleToken();
   if (!token) { letzterGoogleFehler = "Keine gültige Google-Anmeldung (bitte oben neu verbinden)."; return null; }
@@ -439,7 +445,7 @@ async function erstelleGoogleEvent(l, kunde) {
   const body = {
     summary: `Holzlieferung: ${kunde?.name || "Kunde"}`,
     location: kunde?.adresse || "",
-    description: `${holzartLabel(l)}: ${m3(l.menge)}\nPreis: ${eur(l.gesamtpreis)} (${eur(l.preisProM3)}/m³${l.lieferpreis > 0 ? ` + ${eur(l.lieferpreis)} Lieferung` : ""})\nTelefon: ${kunde?.telefon || "-"}`,
+    description: googleEventBeschreibung(l, kunde),
     start: { dateTime: dStart.toISOString() },
     end: { dateTime: dEnd.toISOString() },
   };
@@ -483,7 +489,7 @@ async function aktualisiereGoogleEvent(l, kunde) {
   const body = {
     summary: `Holzlieferung: ${kunde?.name || "Kunde"}`,
     location: kunde?.adresse || "",
-    description: `${holzartLabel(l)}: ${m3(l.menge)}\nPreis: ${eur(l.gesamtpreis)} (${eur(l.preisProM3)}/m³${l.lieferpreis > 0 ? ` + ${eur(l.lieferpreis)} Lieferung` : ""})\nTelefon: ${kunde?.telefon || "-"}`,
+    description: googleEventBeschreibung(l, kunde),
     start: { dateTime: dStart.toISOString() },
     end: { dateTime: dEnd.toISOString() },
     colorId: l.kalenderFarbe || "",
@@ -520,6 +526,8 @@ async function bestaetigeKalenderEintrag() {
   const uhrzeitEl = document.getElementById("kalender-uhrzeit");
   l.kalenderUhrzeit = (uhrzeitEl && uhrzeitEl.value) || "09:00";
   l.kalenderFarbe = dialog.farbeAuswahl !== undefined ? dialog.farbeAuswahl : (l.kalenderFarbe || "");
+  const anmerkungEl = document.getElementById("kalender-anmerkung");
+  l.kalenderAnmerkung = (anmerkungEl && anmerkungEl.value.trim()) || "";
   dialog = null;
   render();
 
@@ -1134,6 +1142,7 @@ function renderDialog() {
     const kunde = state.kunden.find((k) => k.id === l.kundeId);
     const uhrzeit = dialog.uhrzeitEingabe !== undefined ? dialog.uhrzeitEingabe : (l.kalenderUhrzeit || "09:00");
     const farbeAktuell = dialog.farbeAuswahl !== undefined ? dialog.farbeAuswahl : (l.kalenderFarbe || "");
+    const anmerkung = dialog.anmerkungEingabe !== undefined ? dialog.anmerkungEingabe : (l.kalenderAnmerkung || "");
     titel = `${l.googleEventId ? "Kalendereintrag bearbeiten" : "Im Kalender eintragen"} · ${esc(kunde?.name || "Kunde")}`;
     const standardSwatch = `
       <button type="button" onclick="dialog.farbeAuswahl=''; render();" title="Standardfarbe"
@@ -1151,6 +1160,10 @@ function renderDialog() {
         <div>
           <label class="text-sm text-[#4a3626] block mb-2">Farbe (optional)</label>
           <div class="flex flex-wrap gap-2">${standardSwatch}${swatches}</div>
+        </div>
+        <div>
+          <label class="text-sm text-[#4a3626] block mb-1">Anmerkungen (optional)</label>
+          <textarea id="kalender-anmerkung" rows="2" placeholder="z.B. Schlüssel liegt beim Nachbarn …" onfocus="dialog.fokusId=this.id" oninput="dialog.anmerkungEingabe=this.value" class="w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e] resize-none">${esc(anmerkung)}</textarea>
         </div>
       </div>
       <button onclick="bestaetigeKalenderEintrag()" class="w-full mt-4 bg-[#c96f3e] text-[#2b1d13] rounded-lg py-3 text-sm font-medium">✓ Im Kalender speichern</button>`;
