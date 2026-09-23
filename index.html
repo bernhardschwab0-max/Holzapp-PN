@@ -289,16 +289,6 @@ function formatDatum(iso) {
   const d = new Date(iso + "T00:00:00");
   return d.toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" });
 }
-function googleCalendarLink(l, kunde) {
-  const dStart = new Date(l.datum + "T09:00:00");
-  const dEnd = new Date(l.datum + "T10:00:00");
-  const fmt = (d) => d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
-  const titel = encodeURIComponent(`Holzlieferung: ${kunde?.name || "Kunde"}`);
-  const details = encodeURIComponent(`${holzartLabel(l)}: ${m3(l.menge)}\nPreis: ${eur(l.gesamtpreis)} (${eur(l.preisProM3)}/m³${l.lieferpreis > 0 ? ` + ${eur(l.lieferpreis)} Lieferung` : ""})\nTelefon: ${kunde?.telefon || "-"}`);
-  const ort = encodeURIComponent(kunde?.adresse || "");
-  return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${titel}&dates=${fmt(dStart)}/${fmt(dEnd)}&details=${details}&location=${ort}`;
-}
-
 /* ======================= Längen-Aufteilung Schnittholz ======================= */
 const LAENGEN = ["25", "33", "50", "100"];
 function leeresLaengenSet() {
@@ -481,6 +471,30 @@ async function aktualisiereGoogleEvent(l, kunde) {
   } catch (e) {
     console.error("Google Kalender Aktualisieren fehlgeschlagen:", e);
   }
+}
+
+// Wird über den "Kalender"-Button bei einer Lieferung ausgelöst: trägt den Termin
+// direkt per Google-Kalender-API ein, ganz ohne Link/App-Umweg (unabhängig vom Handy).
+async function kalenderEintragErstellen(id) {
+  const l = state.lieferungen.find((x) => x.id === id);
+  if (!l) return;
+  if (!googleToken && !tokenClient) {
+    alert('Bitte zuerst oben auf "Mit Google Kalender verbinden" tippen.');
+    return;
+  }
+  const kunde = state.kunden.find((k) => k.id === l.kundeId);
+  if (l.googleEventId) {
+    await aktualisiereGoogleEvent(l, kunde);
+  } else {
+    const eventId = await erstelleGoogleEvent(l, kunde);
+    if (!eventId) {
+      alert("Eintrag konnte nicht im Kalender gespeichert werden. Bitte prüfe die Verbindung mit Google Kalender.");
+      return;
+    }
+    l.googleEventId = eventId;
+  }
+  render();
+  await speichern();
 }
 
 /* ======================= Firebase ======================= */
@@ -976,7 +990,7 @@ function renderLieferungen() {
               <p class="text-xs text-[#6b4a30]">${eur(l.preisProM3)}/m³${l.lieferpreis > 0 ? ` · +${eur(l.lieferpreis)} Lieferung` : ""} · <span class="font-semibold">${eur(l.gesamtpreis)}</span></p>
             </div>
             <div class="flex gap-2">
-              <a href="${googleCalendarLink(l, kunde)}" target="_blank" rel="noopener noreferrer" class="text-xs flex items-center gap-1 bg-[#2b1d13] text-[#e8ddc3] rounded-full px-2.5 py-1.5">📅 Kalender</a>
+              <button onclick="kalenderEintragErstellen('${l.id}')" class="text-xs flex items-center gap-1 ${l.googleEventId ? "bg-[#3e6b3e]/10 text-[#3e6b3e] border border-[#3e6b3e]/30" : "bg-[#2b1d13] text-[#e8ddc3]"} rounded-full px-2.5 py-1.5">${l.googleEventId ? "✓ Im Kalender" : "📅 Kalender"}</button>
               <button onclick="lieferungBearbeiten('${l.id}')" class="text-xs flex items-center gap-1 border border-[#2b1d13]/20 text-[#4a3626] rounded-full px-2.5 py-1.5">✎ Bearbeiten</button>
               <button onclick="lieferungLoeschen('${l.id}')" class="text-[#a62f2f] p-1.5">🗑</button>
             </div>
