@@ -1196,14 +1196,6 @@ function renderDialog() {
     dialog.kundeId = dialog.kundeId || (kundenAlphabetisch[0] && kundenAlphabetisch[0].id) || "";
     const holzart = dialog.holzart;
     const laenge = dialog.laenge;
-    const kundeSuchbegriff = (dialog.kundeSuche || "").trim().toLowerCase();
-    const kundeTreffer = (k) => !!kundeSuchbegriff && k.name.toLowerCase().includes(kundeSuchbegriff);
-    const kundenGeordnet = [...kundenAlphabetisch].sort((a, b) => (kundeTreffer(a) ? 0 : 1) - (kundeTreffer(b) ? 0 : 1));
-    const kundenListe = kundenGeordnet.map((k) => {
-      const istAusgewaehlt = dialog.kundeId === k.id;
-      const istTreffer = kundeTreffer(k);
-      return `<button type="button" onclick="dialog.kundeId='${k.id}'; render();" class="w-full text-left px-3 py-2 text-sm border-b border-[#2b1d13]/10 ${istAusgewaehlt ? "bg-[#c96f3e]/30 font-medium" : istTreffer ? "bg-[#c96f3e]/10" : ""}">${esc(k.name)}</button>`;
-    }).join("");
     const preisAktuell = holzart === "hart" ? state.preisHart : state.preisWeich;
     const preisVoreinstellung = dialog.preisEingabe !== undefined ? dialog.preisEingabe : (preisAktuell > 0 ? String(preisAktuell).replace(".", ",") : "");
     titel = dialog.bearbeitenId ? "Lieferung bearbeiten" : "Neue Lieferung";
@@ -1217,8 +1209,8 @@ function renderDialog() {
       <div class="space-y-3">
         <div>
           <label class="text-xs text-[#6b4a30] block mb-1">Kunde</label>
-          <input id="l-kunde-suche" type="text" placeholder="Kunde suchen…" value="${esc(dialog.kundeSuche || "")}" onfocus="dialog.fokusId=this.id" oninput="dialog.kundeSuche=this.value; render();" class="w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e] mb-2" />
-          <div class="max-h-40 overflow-y-auto border border-[#2b1d13]/20 rounded-lg bg-[#e8ddc3]">${kundenListe}</div>
+          <input id="l-kunde-suche" type="text" placeholder="Kunde suchen…" value="${esc(dialog.kundeSuche || "")}" onfocus="dialog.fokusId=this.id" oninput="dialog.kundeSuche=this.value; aktualisiereLieferungKundenliste();" class="w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e] mb-2" />
+          <div id="lieferung-kundenliste" class="max-h-40 overflow-y-auto border border-[#2b1d13]/20 rounded-lg bg-[#e8ddc3]">${baueLieferungKundenliste()}</div>
         </div>
         <div>
           <label class="text-xs text-[#6b4a30] block mb-2">Holzart</label>
@@ -1324,6 +1316,24 @@ function setLieferungHolzart(h) {
 function setLieferungLaenge(l) {
   dialog.laenge = l;
   render();
+}
+
+function baueLieferungKundenliste() {
+  const kundenAlphabetisch = [...state.kunden].sort((a, b) => a.name.localeCompare(b.name, "de"));
+  const kundeSuchbegriff = (dialog.kundeSuche || "").trim().toLowerCase();
+  const kundeTreffer = (k) => !!kundeSuchbegriff && k.name.toLowerCase().includes(kundeSuchbegriff);
+  const kundenGeordnet = [...kundenAlphabetisch].sort((a, b) => (kundeTreffer(a) ? 0 : 1) - (kundeTreffer(b) ? 0 : 1));
+  return kundenGeordnet.map((k) => {
+    const istAusgewaehlt = dialog.kundeId === k.id;
+    const istTreffer = kundeTreffer(k);
+    return `<button type="button" onclick="dialog.kundeId='${k.id}'; aktualisiereLieferungKundenliste();" class="w-full text-left px-3 py-2 text-sm border-b border-[#2b1d13]/10 ${istAusgewaehlt ? "bg-[#c96f3e]/30 font-medium" : istTreffer ? "bg-[#c96f3e]/10" : ""}">${esc(k.name)}</button>`;
+  }).join("");
+}
+// Aktualisiert beim Tippen im Suchfeld NUR die Kundenliste (nicht das ganze Fenster),
+// damit auf dem Handy die Tastatur beim Tippen nicht zuklappt.
+function aktualisiereLieferungKundenliste() {
+  const el = document.getElementById("lieferung-kundenliste");
+  if (el) el.innerHTML = baueLieferungKundenliste();
 }
 
 function bestaetigeEinlagern() {
