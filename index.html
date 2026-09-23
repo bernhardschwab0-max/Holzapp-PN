@@ -1222,28 +1222,17 @@ function renderDialog() {
           ${unsortiertVerfuegbar > 0 ? `<button onclick="setLieferungLaenge('unsortiert')" class="w-full mt-2 py-2 rounded-lg text-xs border-2 ${laenge === "unsortiert" ? "border-[#c96f3e] bg-[#c96f3e]/10 font-medium" : "border-[#2b1d13]/15 text-[#6b4a30]"}">Unsortiert (alter Bestand) · ${m3(unsortiertVerfuegbar)}</button>` : ""}
         </div>
         <div class="grid grid-cols-2 gap-3">
-          <div><label class="text-xs text-[#6b4a30] block mb-1">Menge (m³)</label><input id="l-menge" inputmode="decimal" placeholder="0,00" value="${dialog.mengeEingabe || ""}" onfocus="dialog.fokusId=this.id" oninput="dialog.mengeEingabe=this.value" onblur="render()" class="f-num w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e]" /></div>
-          <div><label class="text-xs text-[#6b4a30] block mb-1">Preis/m³ (€)</label><input id="l-preis" inputmode="decimal" placeholder="0,00" value="${preisVoreinstellung}" onfocus="dialog.fokusId=this.id" oninput="dialog.preisEingabe=this.value" onblur="render()" class="f-num w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e]" /></div>
+          <div><label class="text-xs text-[#6b4a30] block mb-1">Menge (m³)</label><input id="l-menge" inputmode="decimal" placeholder="0,00" value="${dialog.mengeEingabe || ""}" onfocus="dialog.fokusId=this.id" oninput="dialog.mengeEingabe=this.value; aktualisiereLieferungPreisvorschau();" class="f-num w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e]" /></div>
+          <div><label class="text-xs text-[#6b4a30] block mb-1">Preis/m³ (€)</label><input id="l-preis" inputmode="decimal" placeholder="0,00" value="${preisVoreinstellung}" onfocus="dialog.fokusId=this.id" oninput="dialog.preisEingabe=this.value; aktualisiereLieferungPreisvorschau();" class="f-num w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e]" /></div>
         </div>
         <div>
           <label class="text-xs text-[#6b4a30] block mb-1">Lieferpreis (€, frei wählbar)</label>
-          <input id="l-lieferpreis" inputmode="decimal" placeholder="0,00" value="${dialog.lieferpreisEingabe || ""}" onfocus="dialog.fokusId=this.id" oninput="dialog.lieferpreisEingabe=this.value" onblur="render()" class="f-num w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e]" />
+          <input id="l-lieferpreis" inputmode="decimal" placeholder="0,00" value="${dialog.lieferpreisEingabe || ""}" onfocus="dialog.fokusId=this.id" oninput="dialog.lieferpreisEingabe=this.value; aktualisiereLieferungPreisvorschau();" class="f-num w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e]" />
         </div>
         <div><label class="text-xs text-[#6b4a30] block mb-1">Liefertermin</label><input id="l-datum" type="date" value="${dialog.datumEingabe || heute()}" oninput="dialog.datumEingabe=this.value" class="w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e]" /></div>
         <div><label class="text-xs text-[#6b4a30] block mb-1">Notiz (optional)</label><textarea id="l-notiz" rows="2" placeholder="z.B. Zufahrt, Ablageort, Absprache …" onfocus="dialog.fokusId=this.id" oninput="dialog.notizEingabe=this.value" class="w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e] resize-none">${esc(dialog.notizEingabe || "")}</textarea></div>
         ${dialog.fehler ? `<p class="text-xs text-[#a62f2f]">${esc(dialog.fehler)}</p>` : ""}
-        ${(() => {
-          const mengeNum = parseFloat(String(dialog.mengeEingabe || "").replace(",", "."));
-          const preisNum = parseFloat(String(preisVoreinstellung || "").replace(",", "."));
-          const lieferNum = parseFloat(String(dialog.lieferpreisEingabe || "0").replace(",", ".")) || 0;
-          if (!Number.isFinite(mengeNum) || !Number.isFinite(preisNum)) return "";
-          const holzpreis = mengeNum * preisNum;
-          return `<div class="bg-[#e8ddc3] rounded-lg p-3 space-y-1">
-            <div class="flex justify-between text-xs text-[#6b4a30]"><span>Holzpreis</span><span class="f-num">${eur(holzpreis)}</span></div>
-            <div class="flex justify-between text-xs text-[#6b4a30]"><span>Lieferpreis</span><span class="f-num">${eur(lieferNum)}</span></div>
-            <div class="flex justify-between text-sm font-semibold pt-1 border-t border-[#2b1d13]/10"><span>Gesamt</span><span class="f-num">${eur(holzpreis + lieferNum)}</span></div>
-          </div>`;
-        })()}
+        <div id="lieferung-preisvorschau">${baueLieferungPreisvorschau()}</div>
       </div>
       <button onclick="bestaetigeLieferung()" class="w-full mt-4 bg-[#c96f3e] text-[#2b1d13] rounded-lg py-3 text-sm font-medium">${dialog.bearbeitenId ? "✓ Änderungen speichern" : "✓ Lieferung eintragen &amp; Bestand abziehen"}</button>`;
   }
@@ -1334,6 +1323,28 @@ function baueLieferungKundenliste() {
 function aktualisiereLieferungKundenliste() {
   const el = document.getElementById("lieferung-kundenliste");
   if (el) el.innerHTML = baueLieferungKundenliste();
+}
+
+function baueLieferungPreisvorschau() {
+  const holzart = dialog.holzart || "hart";
+  const preisAktuell = holzart === "hart" ? state.preisHart : state.preisWeich;
+  const preisVoreinstellung = dialog.preisEingabe !== undefined ? dialog.preisEingabe : (preisAktuell > 0 ? String(preisAktuell).replace(".", ",") : "");
+  const mengeNum = parseFloat(String(dialog.mengeEingabe || "").replace(",", "."));
+  const preisNum = parseFloat(String(preisVoreinstellung || "").replace(",", "."));
+  const lieferNum = parseFloat(String(dialog.lieferpreisEingabe || "0").replace(",", ".")) || 0;
+  if (!Number.isFinite(mengeNum) || !Number.isFinite(preisNum)) return "";
+  const holzpreis = mengeNum * preisNum;
+  return `<div class="bg-[#e8ddc3] rounded-lg p-3 space-y-1">
+    <div class="flex justify-between text-xs text-[#6b4a30]"><span>Holzpreis</span><span class="f-num">${eur(holzpreis)}</span></div>
+    <div class="flex justify-between text-xs text-[#6b4a30]"><span>Lieferpreis</span><span class="f-num">${eur(lieferNum)}</span></div>
+    <div class="flex justify-between text-sm font-semibold pt-1 border-t border-[#2b1d13]/10"><span>Gesamt</span><span class="f-num">${eur(holzpreis + lieferNum)}</span></div>
+  </div>`;
+}
+// Aktualisiert beim Tippen in Menge/Preis/Lieferpreis NUR die Vorschau (nicht das ganze
+// Fenster), damit man auf dem Handy ungehindert ins nächste Feld weiterspringen kann.
+function aktualisiereLieferungPreisvorschau() {
+  const el = document.getElementById("lieferung-preisvorschau");
+  if (el) el.innerHTML = baueLieferungPreisvorschau();
 }
 
 function bestaetigeEinlagern() {
