@@ -633,22 +633,26 @@ function sicherungHerunterladen(id) {
 function holzEinlagern(menge, holzart, laenge) {
   state.bestand[holzart][laenge] = round2((state.bestand[holzart][laenge] || 0) + menge);
   dialog = null;
+  render();
   speichern();
 }
 function holzAbziehen(menge, holzart, laenge) {
   const aktuell = state.bestand[holzart][laenge] || 0;
   state.bestand[holzart][laenge] = Math.max(0, round2(aktuell - menge));
   dialog = null;
+  render();
   speichern();
 }
 function kundeHinzufuegen(name, telefon, adresse) {
   state.kunden.push({ id: uid(), name, telefon, adresse });
   dialog = null;
+  render();
   speichern();
 }
 function kundeLoeschen(id) {
   state.kunden = state.kunden.filter((k) => k.id !== id);
   dialog = null;
+  render();
   speichern();
 }
 async function lieferungHinzufuegen(kundeId, holzart, laenge, menge, preisProM3, lieferpreis, datum, notiz) {
@@ -685,6 +689,7 @@ function lieferungAlsAusgeliefertMarkieren(id) {
   if (!l) return;
   l.status = "ausgeliefert";
   l.ausgeliefertAm = new Date().toISOString();
+  render();
   speichern();
 }
 function lieferungAlsOffenMarkieren(id) {
@@ -692,6 +697,7 @@ function lieferungAlsOffenMarkieren(id) {
   if (!l) return;
   l.status = "offen";
   l.ausgeliefertAm = null;
+  render();
   speichern();
 }
 async function lieferungAktualisieren(id, kundeId, holzart, laenge, menge, preisProM3, lieferpreis, datum, notiz) {
@@ -1334,6 +1340,7 @@ function bestaetigePreis() {
   if (!Number.isFinite(v) || v < 0) return;
   state[dialog.feld] = round2(v);
   dialog = null;
+  render();
   speichern();
 }
 function bestaetigeKunde() {
