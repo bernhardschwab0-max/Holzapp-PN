@@ -1132,7 +1132,7 @@ function renderDialog() {
     const l = state.lieferungen.find((x) => x.id === dialog.lieferungId);
     if (!l) { dialog = null; return ""; }
     const kunde = state.kunden.find((k) => k.id === l.kundeId);
-    const uhrzeit = l.kalenderUhrzeit || "09:00";
+    const uhrzeit = dialog.uhrzeitEingabe !== undefined ? dialog.uhrzeitEingabe : (l.kalenderUhrzeit || "09:00");
     const farbeAktuell = dialog.farbeAuswahl !== undefined ? dialog.farbeAuswahl : (l.kalenderFarbe || "");
     titel = `${l.googleEventId ? "Kalendereintrag bearbeiten" : "Im Kalender eintragen"} · ${esc(kunde?.name || "Kunde")}`;
     const standardSwatch = `
@@ -1146,7 +1146,7 @@ function renderDialog() {
       <div class="space-y-3">
         <div>
           <label class="text-sm text-[#4a3626] block mb-1">Uhrzeit</label>
-          <input id="kalender-uhrzeit" type="time" value="${uhrzeit}" class="w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e]" />
+          <input id="kalender-uhrzeit" type="time" value="${uhrzeit}" onfocus="dialog.fokusId=this.id" oninput="dialog.uhrzeitEingabe=this.value" class="w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e]" />
         </div>
         <div>
           <label class="text-sm text-[#4a3626] block mb-2">Farbe (optional)</label>
