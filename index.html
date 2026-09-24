@@ -35,6 +35,8 @@
   .f-body { font-family:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif; }
   .stamp { transform:rotate(-3deg); border:2px solid currentColor; border-radius:4px; }
   .plank { background-image:repeating-linear-gradient(90deg, rgba(0,0,0,.06) 0px, rgba(0,0,0,.06) 1px, transparent 1px, transparent 8px); }
+  /* Eingabefelder mit "volle Breite" sollen inkl. Innenabstand genau in ihren Rahmen passen (sonst ragen sie rechts heraus) */
+  input, textarea { box-sizing: border-box; }
 
   /* ===== Eigene, sofort verfügbare Utility-Klassen (Ersatz für Tailwind-CDN, dadurch deutlich schnellerer Start) ===== */
   .flex{display:flex}
@@ -493,44 +495,60 @@ function googleEventBeschreibung(l, kunde) {
   return text;
 }
 
-// Neuer Termin: vorerst 09:00-10:00 - Uhrzeit, Farbe usw. stellt man danach direkt in Google Kalender ein.
+const zweistellig = (n) => String(n).padStart(2, "0");
+const datumText = (d) => `${d.getFullYear()}-${zweistellig(d.getMonth() + 1)}-${zweistellig(d.getDate())}`;
+
+// Zeitangabe für Google Kalender: mit Uhrzeit ein Termin von dieser Uhrzeit bis eine Stunde später,
+// ohne genaue Uhrzeit (oder mit Haken "Ganztägig") ein ganztägiger Termin.
+function googleEventZeit(l) {
+  if (l.uhrzeit && !l.ganztaegig) {
+    const dStart = new Date(`${l.datum}T${l.uhrzeit}:00`);
+    const dEnd = new Date(dStart.getTime() + 60 * 60 * 1000);
+    return { start: { dateTime: dStart.toISOString() }, end: { dateTime: dEnd.toISOString() } };
+  }
+  const ende = new Date(`${l.datum}T00:00:00`);
+  ende.setDate(ende.getDate() + 1); // bei ganztägigen Terminen ist das Ende der Folgetag
+  return { start: { date: l.datum }, end: { date: datumText(ende) } };
+}
+
+// Neuer Termin - Farbe, Gäste usw. stellt man danach direkt in Google Kalender ein.
 function googleEventNeu(l, kunde) {
-  const dStart = new Date(`${l.datum}T09:00:00`);
-  const dEnd = new Date(dStart.getTime() + 60 * 60 * 1000);
   return {
     summary: `Holzlieferung: ${kunde?.name || "Kunde"}`,
     location: kunde?.adresse || "",
     description: googleEventBeschreibung(l, kunde),
-    start: { dateTime: dStart.toISOString() },
-    end: { dateTime: dEnd.toISOString() },
+    ...googleEventZeit(l),
     extendedProperties: { private: { holzstandLieferung: l.id } },
   };
 }
 
-// Änderung an der Lieferung: Titel/Ort/Beschreibung/Datum nachziehen, die in Google Kalender
-// eingestellte Uhrzeit, Dauer und Farbe aber NICHT überschreiben.
-function googleEventAenderung(l, kunde, termin) {
-  const pad = (n) => String(n).padStart(2, "0");
-  const datumText = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+// Änderung an der Lieferung: Titel/Ort/Beschreibung nachziehen. Die Zeit wird nur dann neu gesetzt, wenn
+// Uhrzeit/Ganztägig in der App geändert wurden. Sonst wird nur das Datum verschoben und die in Google Kalender
+// eingestellte Uhrzeit, Dauer und Farbe bleiben erhalten.
+// Rückgabe: { body, typWechsel } - typWechsel = der Termin wechselt zwischen "mit Uhrzeit" und "ganztägig".
+function googleEventAenderung(l, kunde, termin, zeitGeaendert) {
   const body = {
     summary: `Holzlieferung: ${kunde?.name || "Kunde"}`,
     location: kunde?.adresse || "",
     description: googleEventBeschreibung(l, kunde),
     extendedProperties: { private: { holzstandLieferung: l.id } },
   };
-  if (termin.start && termin.start.dateTime && termin.end && termin.end.dateTime) {
+  const warGanztaegig = !!(termin.start && termin.start.date);
+  if (zeitGeaendert) {
+    Object.assign(body, googleEventZeit(l));
+  } else if (termin.start && termin.start.dateTime && termin.end && termin.end.dateTime) {
     const alt = new Date(termin.start.dateTime);
     const dauer = new Date(termin.end.dateTime) - alt;
-    const dStart = new Date(`${l.datum}T${pad(alt.getHours())}:${pad(alt.getMinutes())}:00`);
+    const dStart = new Date(`${l.datum}T${zweistellig(alt.getHours())}:${zweistellig(alt.getMinutes())}:00`);
     body.start = { dateTime: dStart.toISOString() };
     body.end = { dateTime: new Date(dStart.getTime() + dauer).toISOString() };
-  } else if (termin.start && termin.start.date) {
+  } else if (warGanztaegig) {
     const ende = new Date(`${l.datum}T00:00:00`);
     ende.setDate(ende.getDate() + 1);
     body.start = { date: l.datum };
     body.end = { date: datumText(ende) };
   }
-  return body;
+  return { body, typWechsel: !!body.start && ("date" in body.start) !== warGanztaegig };
 }
 
 // Sucht den Termin dieser Lieferung im EIGENEN Google Kalender (nicht im Kalender eines anderen Nutzers).
@@ -573,14 +591,20 @@ async function googleTerminHolenOderAnlegen(l, kunde) {
 }
 
 // Nach dem Ändern einer Lieferung: den vorhandenen eigenen Termin nachziehen (legt nichts Neues an).
-async function googleTerminNachziehen(l, kunde) {
+async function googleTerminNachziehen(l, kunde, zeitGeaendert = false) {
   if (!googleToken && !googleTerminFuer(l.id)) return;
   const token = await ensureGoogleToken();
   if (!token) return;
   try {
     const termin = await findeGoogleTermin(l, token);
     if (!termin) return;
-    const neu = await googleKalenderApi(token, `events/${encodeURIComponent(termin.id)}`, { method: "PATCH", body: JSON.stringify(googleEventAenderung(l, kunde, termin)) });
+    const { body, typWechsel } = googleEventAenderung(l, kunde, termin, zeitGeaendert);
+    const pfad = `events/${encodeURIComponent(termin.id)}`;
+    // Beim Wechsel zwischen "mit Uhrzeit" und "ganztägig" muss Start/Ende komplett ersetzt werden: dafür den
+    // ganzen Termin (mit allen eigenen Einstellungen) laden und zurückschreiben, wie es Google empfiehlt.
+    const neu = typWechsel
+      ? await googleKalenderApi(token, pfad, { method: "PUT", body: JSON.stringify({ ...termin, ...body, extendedProperties: { private: { ...(termin.extendedProperties && termin.extendedProperties.private), ...body.extendedProperties.private } } }) })
+      : await googleKalenderApi(token, pfad, { method: "PATCH", body: JSON.stringify(body) });
     merkeGoogleTermin(l.id, neu);
   } catch (e) {
     console.error("Google Kalender Aktualisieren fehlgeschlagen:", e);
@@ -819,7 +843,7 @@ function kundeLoeschen(id) {
   render();
   speichern();
 }
-async function lieferungHinzufuegen(kundeId, holzart, laenge, menge, preisProM3, lieferpreis, datum, notiz) {
+async function lieferungHinzufuegen(kundeId, holzart, laenge, menge, preisProM3, lieferpreis, datum, notiz, uhrzeit, ganztaegig) {
   const bestand = state.bestand[holzart][laenge] || 0;
   if (menge > bestand) {
     dialog.fehler = `Nicht genug ${holzartWort(holzart)} in ${laenge === "unsortiert" ? "Unsortiert" : laenge + "cm"} auf Lager (${m3(bestand)} verfügbar).`;
@@ -832,7 +856,7 @@ async function lieferungHinzufuegen(kundeId, holzart, laenge, menge, preisProM3,
     id: uid(), kundeId, holzart, laenge, menge, preisProM3, lieferpreis: round2(lieferpreis || 0),
     gesamtpreis: round2(holzpreis + (lieferpreis || 0)), datum, erstelltAm: new Date().toISOString(),
     status: "offen", ausgeliefertAm: null,
-    notiz: notiz || "",
+    notiz: notiz || "", uhrzeit: uhrzeit || "", ganztaegig: !!ganztaegig,
   };
   state.bestand[holzart][laenge] = round2(bestand - menge);
   state.lieferungen.push(neueLieferung);
@@ -862,7 +886,7 @@ function lieferungAlsOffenMarkieren(id) {
   render();
   speichern();
 }
-async function lieferungAktualisieren(id, kundeId, holzart, laenge, menge, preisProM3, lieferpreis, datum, notiz) {
+async function lieferungAktualisieren(id, kundeId, holzart, laenge, menge, preisProM3, lieferpreis, datum, notiz, uhrzeit, ganztaegig) {
   const l = state.lieferungen.find((x) => x.id === id);
   if (!l) return;
 
@@ -890,13 +914,17 @@ async function lieferungAktualisieren(id, kundeId, holzart, laenge, menge, preis
   l.gesamtpreis = round2(holzpreis + (lieferpreis || 0));
   l.datum = datum;
   l.notiz = notiz || "";
+  // Nur wenn Uhrzeit/Ganztägig wirklich geändert wurden, wird die Zeit im Google Kalender neu gesetzt.
+  const zeitGeaendert = (l.uhrzeit || "") !== (uhrzeit || "") || !!l.ganztaegig !== !!ganztaegig;
+  l.uhrzeit = uhrzeit || "";
+  l.ganztaegig = !!ganztaegig;
 
   dialog = null;
   render();
   await speichern();
 
   const kunde = state.kunden.find((k) => k.id === kundeId);
-  await googleTerminNachziehen(l, kunde);
+  await googleTerminNachziehen(l, kunde, zeitGeaendert);
   render();
 }
 async function lieferungLoeschen(id) {
@@ -1099,7 +1127,7 @@ function renderLieferungen() {
   if (filterLieferungen === "anstehend") gefiltert = gefiltert.filter((l) => l.datum >= heuteStr && l.status !== "ausgeliefert");
   if (filterLieferungen === "offen") gefiltert = gefiltert.filter((l) => l.status !== "ausgeliefert");
   if (filterLieferungen === "ausgeliefert") gefiltert = gefiltert.filter((l) => l.status === "ausgeliefert");
-  gefiltert.sort((a, b) => a.datum.localeCompare(b.datum));
+  gefiltert.sort((a, b) => a.datum.localeCompare(b.datum) || (a.uhrzeit || "").localeCompare(b.uhrzeit || ""));
 
   const anzahlVorSuche = gefiltert.length;
   const suchbegriff = lieferungenSuche.trim().toLowerCase();
@@ -1124,7 +1152,7 @@ function renderLieferungen() {
           <div class="flex items-start justify-between gap-2">
             <div>
               <p class="font-medium">${esc(kunde?.name || "Unbekannter Kunde")}</p>
-              <p class="text-xs text-[#6b4a30] flex items-center gap-1 mt-0.5">📅 ${formatDatum(l.datum)}</p>
+              <p class="text-xs text-[#6b4a30] flex items-center gap-1 mt-0.5">📅 ${formatDatum(l.datum)}${l.ganztaegig ? " · ganztägig" : l.uhrzeit ? ` · ${esc(l.uhrzeit)} Uhr` : ""}</p>
             </div>
             <div class="flex flex-col items-end gap-1 shrink-0">
               <span class="f-head text-[10px] px-2 py-1 rounded stamp" style="color:${farbe}">${holzartLabel(l)}</span>
@@ -1239,7 +1267,7 @@ function renderDialog() {
   if (dialog.type === "kalenderFertig") {
     titel = "Termin im Kalender";
     body = `
-      <p class="text-sm text-[#4a3626] mb-4">Der Termin ist in deinem Google Kalender angelegt (vorerst 09:00–10:00). Zum Ändern von Uhrzeit, Farbe oder Notizen jetzt in Google Kalender öffnen und dort auf „Fertig“ bzw. „Speichern“ tippen.</p>
+      <p class="text-sm text-[#4a3626] mb-4">Der Termin ist in deinem Google Kalender angelegt. Zum Ändern von Uhrzeit, Farbe oder Notizen jetzt in Google Kalender öffnen und dort auf „Fertig“ bzw. „Speichern“ tippen.</p>
       <a href="${esc(dialog.link)}" target="_blank" rel="noopener noreferrer" onclick="setTimeout(closeDialog, 400)" class="block w-full text-center bg-[#c96f3e] text-[#2b1d13] rounded-lg py-3 text-sm font-medium">↗ In Google Kalender öffnen</a>
       <button onclick="closeDialog()" class="w-full mt-2 text-sm text-[#6b4a30] py-2" style="background:transparent;border:0">Später</button>`;
   }
@@ -1403,6 +1431,17 @@ function renderDialog() {
           <input id="l-lieferpreis" inputmode="decimal" placeholder="0,00" value="${dialog.lieferpreisEingabe || ""}" onfocus="dialog.fokusId=this.id" oninput="dialog.lieferpreisEingabe=this.value; aktualisiereLieferungPreisvorschau();" class="f-num w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e]" />
         </div>
         <div><label class="text-xs text-[#6b4a30] block mb-1">Liefertermin</label><input id="l-datum" type="date" value="${dialog.datumEingabe || heute()}" oninput="dialog.datumEingabe=this.value" class="w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e]" /></div>
+        <div>
+          <label class="text-xs text-[#6b4a30] block mb-1">Uhrzeit (optional)</label>
+          <div class="flex items-center gap-3">
+            <input id="l-uhrzeit" type="time" value="${esc(dialog.uhrzeitEingabe || "")}" ${dialog.ganztaegigEingabe ? "disabled" : ""} oninput="dialog.uhrzeitEingabe=this.value" class="flex-1 border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e] disabled:opacity-40" />
+            <label class="flex items-center gap-2 text-sm text-[#4a3626]">
+              <input id="l-ganztaegig" type="checkbox" ${dialog.ganztaegigEingabe ? "checked" : ""} onchange="dialog.ganztaegigEingabe=this.checked; document.getElementById('l-uhrzeit').disabled=this.checked" style="width:20px;height:20px" />
+              Ganztägig
+            </label>
+          </div>
+          <p class="text-xs text-[#6b4a30] mt-1">Ohne genaue Uhrzeit wird der Termin im Kalender ganztägig eingetragen.</p>
+        </div>
         <div><label class="text-xs text-[#6b4a30] block mb-1">Notiz (optional)</label><textarea id="l-notiz" rows="2" placeholder="z.B. Zufahrt, Ablageort, Absprache …" onfocus="dialog.fokusId=this.id" oninput="dialog.notizEingabe=this.value" class="w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e] resize-none">${esc(dialog.notizEingabe || "")}</textarea></div>
         ${dialog.fehler ? `<p class="text-xs text-[#a62f2f]">${esc(dialog.fehler)}</p>` : ""}
         <div id="lieferung-preisvorschau">${baueLieferungPreisvorschau()}</div>
@@ -1559,11 +1598,13 @@ function bestaetigeLieferung() {
   const lieferpreis = lieferpreisRoh === "" ? 0 : parseFloat(lieferpreisRoh.replace(",", "."));
   const datum = document.getElementById("l-datum").value;
   const notiz = document.getElementById("l-notiz").value.trim();
+  const ganztaegig = document.getElementById("l-ganztaegig").checked;
+  const uhrzeit = ganztaegig ? "" : document.getElementById("l-uhrzeit").value;
   if (!kundeId || !Number.isFinite(menge) || menge <= 0 || !Number.isFinite(preis) || preis <= 0 || !Number.isFinite(lieferpreis) || lieferpreis < 0 || !datum) return;
   if (dialog.bearbeitenId) {
-    lieferungAktualisieren(dialog.bearbeitenId, kundeId, holzart, laenge, menge, preis, lieferpreis, datum, notiz);
+    lieferungAktualisieren(dialog.bearbeitenId, kundeId, holzart, laenge, menge, preis, lieferpreis, datum, notiz, uhrzeit, ganztaegig);
   } else {
-    lieferungHinzufuegen(kundeId, holzart, laenge, menge, preis, lieferpreis, datum, notiz);
+    lieferungHinzufuegen(kundeId, holzart, laenge, menge, preis, lieferpreis, datum, notiz, uhrzeit, ganztaegig);
   }
 }
 
@@ -1581,6 +1622,8 @@ function lieferungBearbeiten(id) {
     lieferpreisEingabe: l.lieferpreis > 0 ? String(l.lieferpreis).replace(".", ",") : "",
     datumEingabe: l.datum,
     notizEingabe: l.notiz || "",
+    uhrzeitEingabe: l.uhrzeit || "",
+    ganztaegigEingabe: !!l.ganztaegig,
   });
 }
 
