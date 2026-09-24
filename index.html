@@ -436,6 +436,13 @@ function merkeGoogleTermin(lieferungId, termin) {
   try { localStorage.setItem("google_termine", JSON.stringify(alle)); } catch (e) {}
 }
 
+// Macht aus dem normalen Termin-Link (nur ansehen) den Link, der den Termin gleich in der
+// Bearbeiten-Ansicht von Google Kalender öffnet (Uhrzeit, Farbe usw. ändern -> Speichern/Fertig).
+function googleBearbeitenLink(link) {
+  const treffer = /[?&]eid=([^&#]+)/.exec(link || "");
+  return treffer ? `https://calendar.google.com/calendar/u/0/r/eventedit/${treffer[1]}` : link;
+}
+
 async function googleKalenderApi(token, pfad, optionen = {}) {
   const headers = { Authorization: `Bearer ${token}` };
   if (optionen.body) headers["Content-Type"] = "application/json";
@@ -587,7 +594,7 @@ async function kalenderOeffnen(id) {
     alert("Eintrag konnte nicht im Kalender gespeichert werden." + (letzterGoogleFehler ? "\n\nGrund: " + letzterGoogleFehler : ""));
     return;
   }
-  if (fenster && termin.htmlLink) fenster.location.href = termin.htmlLink;
+  if (fenster && termin.htmlLink) fenster.location.href = googleBearbeitenLink(termin.htmlLink);
   render(); // der Button wird jetzt zum Link "✓ Im Kalender"
 }
 
@@ -1084,7 +1091,7 @@ function renderLieferungen() {
             </div>
             <div class="flex gap-2">
               ${termin && termin.link
-                ? `<a href="${esc(termin.link)}" target="_blank" rel="noopener noreferrer" class="text-xs flex items-center gap-1 bg-[#3e6b3e]/10 text-[#3e6b3e] border border-[#3e6b3e]/30 rounded-full px-2.5 py-1.5">✓ Im Kalender</a>`
+                ? `<a href="${esc(googleBearbeitenLink(termin.link))}" target="_blank" rel="noopener noreferrer" class="text-xs flex items-center gap-1 bg-[#3e6b3e]/10 text-[#3e6b3e] border border-[#3e6b3e]/30 rounded-full px-2.5 py-1.5">✓ Im Kalender</a>`
                 : `<button onclick="kalenderOeffnen('${l.id}')" ${kalenderBusy === l.id ? "disabled" : ""} class="text-xs flex items-center gap-1 bg-[#2b1d13] text-[#e8ddc3] rounded-full px-2.5 py-1.5 disabled:opacity-40">${kalenderBusy === l.id ? "…" : "📅 Kalender"}</button>`}
               <button onclick="lieferungBearbeiten('${l.id}')" class="text-xs flex items-center gap-1 border border-[#2b1d13]/20 text-[#4a3626] rounded-full px-2.5 py-1.5">✎ Bearbeiten</button>
               <button onclick="lieferungLoeschen('${l.id}')" class="text-[#a62f2f] p-1.5">🗑</button>
