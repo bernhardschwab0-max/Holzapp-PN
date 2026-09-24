@@ -357,6 +357,13 @@ let schreibtGerade = false;
 /* ======================= Google Kalender (OAuth) ======================= */
 let googleToken = null; // { access_token, expires_at }
 let tokenClient = null;
+let googleErneuernAbbruch = null; // beendet das Warten auf ein neues Google-Token sofort, wenn das Google-Fenster nicht aufgeht
+let googleErneuernGrund = "";     // Grund, warum das Erneuern nicht geklappt hat (für die Fehlermeldung)
+
+// E-Mail des zuletzt verwendeten Google-Kontos: damit muss Google beim Erneuern nicht wieder nach dem Konto fragen.
+function googleKonto() {
+  try { return localStorage.getItem("google_konto") || ""; } catch (e) { return ""; }
+}
 
 function initGoogleAuth() {
   if (!window.google || !google.accounts || !google.accounts.oauth2) return;
@@ -368,7 +375,15 @@ function initGoogleAuth() {
         googleToken = { access_token: resp.access_token, expires_at: Date.now() + (resp.expires_in * 1000 - 60000) };
         try { localStorage.setItem("google_token", JSON.stringify(googleToken)); } catch (e) {}
         render();
+      } else if (resp && resp.error) {
+        alert(`Die Anmeldung bei Google hat nicht geklappt (${resp.error}).`);
       }
+    },
+    // Google-Fenster ging nicht auf oder wurde geschlossen
+    error_callback: (fehler) => {
+      const typ = (fehler && fehler.type) || "unknown";
+      if (googleErneuernAbbruch) googleErneuernAbbruch(typ);
+      else if (typ === "popup_failed_to_open") alert('Das Google-Fenster konnte nicht geöffnet werden. Bitte noch einmal auf "Mit Google Kalender verbinden" tippen.');
     },
   });
   try {
@@ -381,11 +396,12 @@ window.addEventListener("load", initGoogleAuth);
 
 function connectGoogle() {
   if (!tokenClient) return alert("Google-Anmeldung lädt noch, bitte kurz warten und erneut klicken.");
-  tokenClient.requestAccessToken({ prompt: googleToken ? "" : "consent" });
+  // prompt "": Google zeigt die Zustimmungsseite nur beim allerersten Mal. Mit bekannter E-Mail entfällt auch die Konto-Auswahl.
+  tokenClient.requestAccessToken({ prompt: "", ...(googleKonto() ? { login_hint: googleKonto() } : {}) });
 }
 function trenneGoogle() {
   googleToken = null;
-  try { localStorage.removeItem("google_token"); } catch (e) {}
+  try { localStorage.removeItem("google_token"); localStorage.removeItem("google_konto"); } catch (e) {}
   render();
 }
 
@@ -396,24 +412,27 @@ function ensureGoogleToken() {
     const zuvor = tokenClient.callback;
     let fertig = false;
     // Falls das Google-Fenster blockiert oder ohne Ergebnis geschlossen wird, nicht ewig warten.
-    const timer = setTimeout(() => abschliessen(null), 30000);
-    const abschliessen = (token) => {
+    const timer = setTimeout(() => abschliessen(null, "timeout"), 30000);
+    const abschliessen = (token, grund) => {
       if (fertig) return;
       fertig = true;
       clearTimeout(timer);
       tokenClient.callback = zuvor;
+      googleErneuernAbbruch = null;
+      googleErneuernGrund = token ? "" : (grund || "");
       resolve(token);
     };
+    googleErneuernAbbruch = (typ) => abschliessen(null, typ);
     tokenClient.callback = (resp) => {
       if (resp && resp.access_token) {
         googleToken = { access_token: resp.access_token, expires_at: Date.now() + (resp.expires_in * 1000 - 60000) };
         try { localStorage.setItem("google_token", JSON.stringify(googleToken)); } catch (e) {}
         abschliessen(googleToken.access_token);
       } else {
-        abschliessen(null);
+        abschliessen(null, (resp && resp.error) || "unknown");
       }
     };
-    tokenClient.requestAccessToken({ prompt: "" });
+    tokenClient.requestAccessToken({ prompt: "", ...(googleKonto() ? { login_hint: googleKonto() } : {}) });
   });
 }
 
@@ -435,8 +454,13 @@ function googleKontoVon(termin) {
 }
 function merkeGoogleTermin(lieferungId, termin) {
   const alle = googleTermine();
-  if (termin) alle[lieferungId] = { id: termin.id, link: termin.htmlLink, konto: googleKontoVon(termin) };
-  else delete alle[lieferungId];
+  if (termin) {
+    const konto = googleKontoVon(termin);
+    alle[lieferungId] = { id: termin.id, link: termin.htmlLink, konto };
+    if (konto) { try { localStorage.setItem("google_konto", konto); } catch (e) {} }
+  } else {
+    delete alle[lieferungId];
+  }
   try { localStorage.setItem("google_termine", JSON.stringify(alle)); } catch (e) {}
 }
 
@@ -531,7 +555,10 @@ async function findeGoogleTermin(l, token) {
 // Einen bereits vorhandenen Termin ändert das NICHT (damit eigene Änderungen erhalten bleiben).
 async function googleTerminHolenOderAnlegen(l, kunde) {
   const token = await ensureGoogleToken();
-  if (!token) { letzterGoogleFehler = "Keine gültige Google-Anmeldung (bitte oben neu verbinden)."; return null; }
+  if (!token) {
+    letzterGoogleFehler = 'Keine gültige Google-Anmeldung (bitte oben auf "Mit Google Kalender verbinden" tippen)' + (googleErneuernGrund ? ` [${googleErneuernGrund}]` : "") + ".";
+    return null;
+  }
   try {
     let termin = await findeGoogleTermin(l, token);
     if (!termin) termin = await googleKalenderApi(token, "events", { method: "POST", body: JSON.stringify(googleEventNeu(l, kunde)) });
