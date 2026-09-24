@@ -394,14 +394,23 @@ function ensureGoogleToken() {
   if (!tokenClient) return Promise.resolve(null);
   return new Promise((resolve) => {
     const zuvor = tokenClient.callback;
-    tokenClient.callback = (resp) => {
+    let fertig = false;
+    // Falls das Google-Fenster blockiert oder ohne Ergebnis geschlossen wird, nicht ewig warten.
+    const timer = setTimeout(() => abschliessen(null), 30000);
+    const abschliessen = (token) => {
+      if (fertig) return;
+      fertig = true;
+      clearTimeout(timer);
       tokenClient.callback = zuvor;
+      resolve(token);
+    };
+    tokenClient.callback = (resp) => {
       if (resp && resp.access_token) {
         googleToken = { access_token: resp.access_token, expires_at: Date.now() + (resp.expires_in * 1000 - 60000) };
         try { localStorage.setItem("google_token", JSON.stringify(googleToken)); } catch (e) {}
-        resolve(googleToken.access_token);
+        abschliessen(googleToken.access_token);
       } else {
-        resolve(null);
+        abschliessen(null);
       }
     };
     tokenClient.requestAccessToken({ prompt: "" });
@@ -409,57 +418,111 @@ function ensureGoogleToken() {
 }
 
 let letzterGoogleFehler = "";
+let kalenderBusy = null; // ID der Lieferung, für die gerade ein Termin angelegt wird
 
-// Google Kalender kennt nur diese 11 festen Event-Farben (colorId 1-11).
-const GOOGLE_FARBEN = [
-  { id: "1", name: "Lavendel", hex: "#7986cb" },
-  { id: "2", name: "Salbei", hex: "#33b679" },
-  { id: "3", name: "Traube", hex: "#8e24aa" },
-  { id: "4", name: "Flamingo", hex: "#e67c73" },
-  { id: "5", name: "Banane", hex: "#f6bf26" },
-  { id: "6", name: "Mandarine", hex: "#f4511e" },
-  { id: "7", name: "Pfau", hex: "#039be5" },
-  { id: "8", name: "Graphit", hex: "#616161" },
-  { id: "9", name: "Heidelbeere", hex: "#3f51b5" },
-  { id: "10", name: "Basilikum", hex: "#0b8043" },
-  { id: "11", name: "Tomate", hex: "#d50000" },
-];
+// Jedes Gerät merkt sich (nur lokal), welcher Google-Termin zu welcher Lieferung gehört.
+// So bekommt jeder Nutzer den Termin in seinen EIGENEN Kalender, ohne dass sich die
+// Nutzer gegenseitig in die Quere kommen (in der gemeinsamen Datenbank steht dazu nichts).
+function googleTermine() {
+  try { return JSON.parse(localStorage.getItem("google_termine") || "{}"); } catch (e) { return {}; }
+}
+function googleTerminFuer(lieferungId) {
+  return googleTermine()[lieferungId] || null;
+}
+function merkeGoogleTermin(lieferungId, termin) {
+  const alle = googleTermine();
+  if (termin) alle[lieferungId] = { id: termin.id, link: termin.htmlLink };
+  else delete alle[lieferungId];
+  try { localStorage.setItem("google_termine", JSON.stringify(alle)); } catch (e) {}
+}
 
-function googleEventZeiten(l) {
-  const uhrzeit = l.kalenderUhrzeit || "09:00";
-  const dStart = new Date(`${l.datum}T${uhrzeit}:00`);
-  const dEnd = new Date(dStart.getTime() + 60 * 60 * 1000);
-  return { dStart, dEnd };
+async function googleKalenderApi(token, pfad, optionen = {}) {
+  const headers = { Authorization: `Bearer ${token}` };
+  if (optionen.body) headers["Content-Type"] = "application/json";
+  const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/${pfad}`, { ...optionen, headers });
+  if (!res.ok) {
+    const fehler = new Error(`${res.status}: ${await res.text()}`);
+    fehler.status = res.status;
+    throw fehler;
+  }
+  return res.status === 204 ? null : res.json();
 }
 
 function googleEventBeschreibung(l, kunde) {
   let text = `${holzartLabel(l)}: ${m3(l.menge)}\nPreis: ${eur(l.gesamtpreis)} (${eur(l.preisProM3)}/m³${l.lieferpreis > 0 ? ` + ${eur(l.lieferpreis)} Lieferung` : ""})\nTelefon: ${kunde?.telefon || "-"}`;
-  if (l.kalenderAnmerkung) text += `\nAnmerkung: ${l.kalenderAnmerkung}`;
+  if (l.notiz) text += `\nNotiz: ${l.notiz}`;
   return text;
 }
 
-async function erstelleGoogleEvent(l, kunde) {
-  const token = await ensureGoogleToken();
-  if (!token) { letzterGoogleFehler = "Keine gültige Google-Anmeldung (bitte oben neu verbinden)."; return null; }
-  const { dStart, dEnd } = googleEventZeiten(l);
-  const body = {
+// Neuer Termin: vorerst 09:00-10:00 - Uhrzeit, Farbe usw. stellt man danach direkt in Google Kalender ein.
+function googleEventNeu(l, kunde) {
+  const dStart = new Date(`${l.datum}T09:00:00`);
+  const dEnd = new Date(dStart.getTime() + 60 * 60 * 1000);
+  return {
     summary: `Holzlieferung: ${kunde?.name || "Kunde"}`,
     location: kunde?.adresse || "",
     description: googleEventBeschreibung(l, kunde),
     start: { dateTime: dStart.toISOString() },
     end: { dateTime: dEnd.toISOString() },
+    extendedProperties: { private: { holzstandLieferung: l.id } },
   };
-  if (l.kalenderFarbe) body.colorId = l.kalenderFarbe;
+}
+
+// Änderung an der Lieferung: Titel/Ort/Beschreibung/Datum nachziehen, die in Google Kalender
+// eingestellte Uhrzeit, Dauer und Farbe aber NICHT überschreiben.
+function googleEventAenderung(l, kunde, termin) {
+  const pad = (n) => String(n).padStart(2, "0");
+  const datumText = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const body = {
+    summary: `Holzlieferung: ${kunde?.name || "Kunde"}`,
+    location: kunde?.adresse || "",
+    description: googleEventBeschreibung(l, kunde),
+    extendedProperties: { private: { holzstandLieferung: l.id } },
+  };
+  if (termin.start && termin.start.dateTime && termin.end && termin.end.dateTime) {
+    const alt = new Date(termin.start.dateTime);
+    const dauer = new Date(termin.end.dateTime) - alt;
+    const dStart = new Date(`${l.datum}T${pad(alt.getHours())}:${pad(alt.getMinutes())}:00`);
+    body.start = { dateTime: dStart.toISOString() };
+    body.end = { dateTime: new Date(dStart.getTime() + dauer).toISOString() };
+  } else if (termin.start && termin.start.date) {
+    const ende = new Date(`${l.datum}T00:00:00`);
+    ende.setDate(ende.getDate() + 1);
+    body.start = { date: l.datum };
+    body.end = { date: datumText(ende) };
+  }
+  return body;
+}
+
+// Sucht den Termin dieser Lieferung im EIGENEN Google Kalender (nicht im Kalender eines anderen Nutzers).
+async function findeGoogleTermin(l, token) {
+  const kandidaten = [];
+  const gemerkt = googleTerminFuer(l.id);
+  if (gemerkt) kandidaten.push(gemerkt.id);
+  if (l.googleEventId && !kandidaten.includes(l.googleEventId)) kandidaten.push(l.googleEventId); // ältere Termine
+  for (const id of kandidaten) {
+    try {
+      const termin = await googleKalenderApi(token, `events/${encodeURIComponent(id)}`);
+      if (termin && termin.status !== "cancelled") return termin;
+    } catch (e) {
+      if (e.status !== 404 && e.status !== 410) throw e; // gehört nicht zu meinem Kalender
+    }
+  }
+  const treffer = await googleKalenderApi(token, `events?maxResults=1&privateExtendedProperty=${encodeURIComponent("holzstandLieferung=" + l.id)}`);
+  return (treffer && treffer.items && treffer.items[0]) || null;
+}
+
+// Liefert den Termin im eigenen Google Kalender und legt ihn an, falls es noch keinen gibt.
+// Einen bereits vorhandenen Termin ändert das NICHT (damit eigene Änderungen erhalten bleiben).
+async function googleTerminHolenOderAnlegen(l, kunde) {
+  const token = await ensureGoogleToken();
+  if (!token) { letzterGoogleFehler = "Keine gültige Google-Anmeldung (bitte oben neu verbinden)."; return null; }
   try {
-    const res = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
-    const data = await res.json();
+    let termin = await findeGoogleTermin(l, token);
+    if (!termin) termin = await googleKalenderApi(token, "events", { method: "POST", body: JSON.stringify(googleEventNeu(l, kunde)) });
+    merkeGoogleTermin(l.id, termin);
     letzterGoogleFehler = "";
-    return data.id;
+    return termin;
   } catch (e) {
     console.error("Google Kalender Fehler:", e);
     letzterGoogleFehler = e.message || String(e);
@@ -467,85 +530,65 @@ async function erstelleGoogleEvent(l, kunde) {
   }
 }
 
-async function loescheGoogleEvent(eventId) {
-  if (!eventId) return;
+// Nach dem Ändern einer Lieferung: den vorhandenen eigenen Termin nachziehen (legt nichts Neues an).
+async function googleTerminNachziehen(l, kunde) {
+  if (!googleToken && !googleTerminFuer(l.id)) return;
   const token = await ensureGoogleToken();
   if (!token) return;
   try {
-    await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const termin = await findeGoogleTermin(l, token);
+    if (!termin) return;
+    const neu = await googleKalenderApi(token, `events/${encodeURIComponent(termin.id)}`, { method: "PATCH", body: JSON.stringify(googleEventAenderung(l, kunde, termin)) });
+    merkeGoogleTermin(l.id, neu);
+  } catch (e) {
+    console.error("Google Kalender Aktualisieren fehlgeschlagen:", e);
+  }
+}
+
+async function googleTerminLoeschen(l) {
+  if (!googleToken && !googleTerminFuer(l.id)) return;
+  const token = await ensureGoogleToken();
+  if (!token) return;
+  try {
+    const termin = await findeGoogleTermin(l, token);
+    if (termin) await googleKalenderApi(token, `events/${encodeURIComponent(termin.id)}`, { method: "DELETE" });
   } catch (e) {
     console.error("Google Kalender Löschen fehlgeschlagen:", e);
   }
+  merkeGoogleTermin(l.id, null);
 }
 
-async function aktualisiereGoogleEvent(l, kunde) {
-  if (!l.googleEventId) return false;
-  const token = await ensureGoogleToken();
-  if (!token) { letzterGoogleFehler = "Keine gültige Google-Anmeldung (bitte oben neu verbinden)."; return false; }
-  const { dStart, dEnd } = googleEventZeiten(l);
-  const body = {
-    summary: `Holzlieferung: ${kunde?.name || "Kunde"}`,
-    location: kunde?.adresse || "",
-    description: googleEventBeschreibung(l, kunde),
-    start: { dateTime: dStart.toISOString() },
-    end: { dateTime: dEnd.toISOString() },
-    colorId: l.kalenderFarbe || "",
-  };
-  try {
-    const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${l.googleEventId}`, {
-      method: "PATCH",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
-    letzterGoogleFehler = "";
-    return true;
-  } catch (e) {
-    console.error("Google Kalender Aktualisieren fehlgeschlagen:", e);
-    letzterGoogleFehler = e.message || String(e);
-    return false;
-  }
-}
-
-// Wird über den "Kalender"-Button bei einer Lieferung ausgelöst: trägt den Termin
-// direkt per Google-Kalender-API ein, ganz ohne Link/App-Umweg (unabhängig vom Handy).
-function kalenderDialogOeffnen(id) {
+// "Kalender"-Button: legt den Termin im eigenen Google Kalender an (falls noch nicht vorhanden) und
+// öffnet ihn danach in Google Kalender - dort lassen sich Uhrzeit, Farbe, Gäste usw. direkt ändern.
+async function kalenderOeffnen(id) {
+  const l = state.lieferungen.find((x) => x.id === id);
+  if (!l || kalenderBusy) return;
   if (!googleToken && !tokenClient) {
     alert('Bitte zuerst oben auf "Mit Google Kalender verbinden" tippen.');
     return;
   }
-  openDialog({ type: "kalenderEintrag", lieferungId: id });
-}
-
-async function bestaetigeKalenderEintrag() {
-  const l = state.lieferungen.find((x) => x.id === dialog.lieferungId);
-  if (!l) { dialog = null; render(); return; }
-  const uhrzeitEl = document.getElementById("kalender-uhrzeit");
-  l.kalenderUhrzeit = (uhrzeitEl && uhrzeitEl.value) || "09:00";
-  l.kalenderFarbe = dialog.farbeAuswahl !== undefined ? dialog.farbeAuswahl : (l.kalenderFarbe || "");
-  const anmerkungEl = document.getElementById("kalender-anmerkung");
-  l.kalenderAnmerkung = (anmerkungEl && anmerkungEl.value.trim()) || "";
-  dialog = null;
+  // Das Fenster muss noch direkt im Klick geöffnet werden, sonst blockiert es das iPhone.
+  const tokenGueltig = googleToken && googleToken.expires_at > Date.now();
+  const fenster = tokenGueltig ? window.open("", "_blank") : null;
+  if (fenster) {
+    try {
+      fenster.document.title = "Google Kalender";
+      fenster.document.body.textContent = "Termin wird angelegt …";
+    } catch (e) {}
+  }
+  kalenderBusy = id;
   render();
-
   const kunde = state.kunden.find((k) => k.id === l.kundeId);
-  letzterGoogleFehler = "";
-  let erfolg;
-  if (l.googleEventId) {
-    erfolg = await aktualisiereGoogleEvent(l, kunde);
-  } else {
-    const eventId = await erstelleGoogleEvent(l, kunde);
-    erfolg = !!eventId;
-    if (eventId) l.googleEventId = eventId;
-  }
-  render();
-  await speichern();
-  if (!erfolg) {
+  const termin = await googleTerminHolenOderAnlegen(l, kunde);
+  kalenderBusy = null;
+  if (!termin) {
+    if (fenster) fenster.close();
+    render();
     alert("Eintrag konnte nicht im Kalender gespeichert werden." + (letzterGoogleFehler ? "\n\nGrund: " + letzterGoogleFehler : ""));
+    return;
   }
+  if (fenster && termin.htmlLink) fenster.location.href = termin.htmlLink;
+  render(); // der Button wird jetzt zum Link "✓ Im Kalender"
 }
 
 /* ======================= Firebase ======================= */
@@ -733,7 +776,7 @@ async function lieferungHinzufuegen(kundeId, holzart, laenge, menge, preisProM3,
     id: uid(), kundeId, holzart, laenge, menge, preisProM3, lieferpreis: round2(lieferpreis || 0),
     gesamtpreis: round2(holzpreis + (lieferpreis || 0)), datum, erstelltAm: new Date().toISOString(),
     status: "offen", ausgeliefertAm: null,
-    googleEventId: null, notiz: notiz || "",
+    notiz: notiz || "",
   };
   state.bestand[holzart][laenge] = round2(bestand - menge);
   state.lieferungen.push(neueLieferung);
@@ -741,12 +784,10 @@ async function lieferungHinzufuegen(kundeId, holzart, laenge, menge, preisProM3,
   render();
   await speichern();
 
-  if (googleToken || tokenClient) {
-    const eventId = await erstelleGoogleEvent(neueLieferung, kunde);
-    if (eventId) {
-      neueLieferung.googleEventId = eventId;
-      await speichern();
-    }
+  // Ist dieses Gerät mit Google Kalender verbunden, wird der Termin gleich im eigenen Kalender angelegt.
+  if (googleToken) {
+    const termin = await googleTerminHolenOderAnlegen(neueLieferung, kunde);
+    if (termin) render();
   }
 }
 function lieferungAlsAusgeliefertMarkieren(id) {
@@ -798,10 +839,9 @@ async function lieferungAktualisieren(id, kundeId, holzart, laenge, menge, preis
   render();
   await speichern();
 
-  if (l.googleEventId) {
-    const kunde = state.kunden.find((k) => k.id === kundeId);
-    await aktualisiereGoogleEvent(l, kunde);
-  }
+  const kunde = state.kunden.find((k) => k.id === kundeId);
+  await googleTerminNachziehen(l, kunde);
+  render();
 }
 async function lieferungLoeschen(id) {
   const l = state.lieferungen.find((x) => x.id === id);
@@ -820,7 +860,7 @@ async function lieferungLoeschen(id) {
   state.lieferungen = state.lieferungen.filter((x) => x.id !== id);
   render();
   await speichern();
-  if (l.googleEventId) await loescheGoogleEvent(l.googleEventId);
+  await googleTerminLoeschen(l);
 }
 
 /* ======================= Rendering ======================= */
@@ -1014,8 +1054,10 @@ function renderLieferungen() {
     });
   }
 
+  const termine = googleTermine();
   const karten = gefiltert.map((l) => {
     const kunde = state.kunden.find((k) => k.id === l.kundeId);
+    const termin = termine[l.id];
     const istHart = l.holzart === "hart";
     const farbe = istHart ? "#5c3d2e" : "#c9a66b";
     const istAusgeliefert = l.status === "ausgeliefert";
@@ -1041,7 +1083,9 @@ function renderLieferungen() {
               <p class="text-xs text-[#6b4a30]">${eur(l.preisProM3)}/m³${l.lieferpreis > 0 ? ` · +${eur(l.lieferpreis)} Lieferung` : ""} · <span class="font-semibold">${eur(l.gesamtpreis)}</span></p>
             </div>
             <div class="flex gap-2">
-              <button onclick="kalenderDialogOeffnen('${l.id}')" class="text-xs flex items-center gap-1 ${l.googleEventId ? "bg-[#3e6b3e]/10 text-[#3e6b3e] border border-[#3e6b3e]/30" : "bg-[#2b1d13] text-[#e8ddc3]"} rounded-full px-2.5 py-1.5">${l.googleEventId ? "✓ Im Kalender" : "📅 Kalender"}</button>
+              ${termin && termin.link
+                ? `<a href="${esc(termin.link)}" target="_blank" rel="noopener noreferrer" class="text-xs flex items-center gap-1 bg-[#3e6b3e]/10 text-[#3e6b3e] border border-[#3e6b3e]/30 rounded-full px-2.5 py-1.5">✓ Im Kalender</a>`
+                : `<button onclick="kalenderOeffnen('${l.id}')" ${kalenderBusy === l.id ? "disabled" : ""} class="text-xs flex items-center gap-1 bg-[#2b1d13] text-[#e8ddc3] rounded-full px-2.5 py-1.5 disabled:opacity-40">${kalenderBusy === l.id ? "…" : "📅 Kalender"}</button>`}
               <button onclick="lieferungBearbeiten('${l.id}')" class="text-xs flex items-center gap-1 border border-[#2b1d13]/20 text-[#4a3626] rounded-full px-2.5 py-1.5">✎ Bearbeiten</button>
               <button onclick="lieferungLoeschen('${l.id}')" class="text-[#a62f2f] p-1.5">🗑</button>
             </div>
@@ -1134,39 +1178,6 @@ function renderDialog() {
       <label class="text-sm text-[#4a3626] block mb-2">Länge</label>
       <div class="grid grid-cols-4 gap-2 mb-4">${LAENGEN.map(laengeBtn).join("")}</div>
       <button onclick="bestaetigeEinlagern()" class="w-full bg-[#c96f3e] text-[#2b1d13] rounded-lg py-3 text-sm font-medium">${dialog.modus === "abziehen" ? "Abziehen" : "Einlagern"}</button>`;
-  }
-
-  if (dialog.type === "kalenderEintrag") {
-    const l = state.lieferungen.find((x) => x.id === dialog.lieferungId);
-    if (!l) { dialog = null; return ""; }
-    const kunde = state.kunden.find((k) => k.id === l.kundeId);
-    const uhrzeit = dialog.uhrzeitEingabe !== undefined ? dialog.uhrzeitEingabe : (l.kalenderUhrzeit || "09:00");
-    const farbeAktuell = dialog.farbeAuswahl !== undefined ? dialog.farbeAuswahl : (l.kalenderFarbe || "");
-    const anmerkung = dialog.anmerkungEingabe !== undefined ? dialog.anmerkungEingabe : (l.kalenderAnmerkung || "");
-    titel = `${l.googleEventId ? "Kalendereintrag bearbeiten" : "Im Kalender eintragen"} · ${esc(kunde?.name || "Kunde")}`;
-    const standardSwatch = `
-      <button type="button" onclick="dialog.farbeAuswahl=''; render();" title="Standardfarbe"
-        class="w-9 h-9 rounded-full flex items-center justify-center text-xs text-[#6b4a30]"
-        style="background:transparent; border:2px ${farbeAktuell === "" ? "solid #2b1d13" : "dashed #6b4a30"}">–</button>`;
-    const swatches = GOOGLE_FARBEN.map((f) => `
-      <button type="button" onclick="dialog.farbeAuswahl='${f.id}'; render();" title="${f.name}"
-        class="w-9 h-9 rounded-full" style="background-color:${f.hex}; border:3px solid ${farbeAktuell === f.id ? "#2b1d13" : "transparent"}"></button>`).join("");
-    body = `
-      <div class="space-y-3">
-        <div>
-          <label class="text-sm text-[#4a3626] block mb-1">Uhrzeit</label>
-          <input id="kalender-uhrzeit" type="time" value="${uhrzeit}" onfocus="dialog.fokusId=this.id" oninput="dialog.uhrzeitEingabe=this.value" class="w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e]" />
-        </div>
-        <div>
-          <label class="text-sm text-[#4a3626] block mb-2">Farbe (optional)</label>
-          <div class="flex flex-wrap gap-2">${standardSwatch}${swatches}</div>
-        </div>
-        <div>
-          <label class="text-sm text-[#4a3626] block mb-1">Anmerkungen (optional)</label>
-          <textarea id="kalender-anmerkung" rows="2" placeholder="z.B. Schlüssel liegt beim Nachbarn …" onfocus="dialog.fokusId=this.id" oninput="dialog.anmerkungEingabe=this.value" class="w-full border border-[#2b1d13]/20 rounded-lg px-3 py-2 bg-[#e8ddc3] focus:outline-none focus:ring-2 focus:ring-[#c96f3e] resize-none">${esc(anmerkung)}</textarea>
-        </div>
-      </div>
-      <button onclick="bestaetigeKalenderEintrag()" class="w-full mt-4 bg-[#c96f3e] text-[#2b1d13] rounded-lg py-3 text-sm font-medium">✓ Im Kalender speichern</button>`;
   }
 
   if (dialog.type === "preis") {
