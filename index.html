@@ -429,18 +429,26 @@ function googleTermine() {
 function googleTerminFuer(lieferungId) {
   return googleTermine()[lieferungId] || null;
 }
+// E-Mail-Adresse des Google-Kontos, in dessen Kalender der Termin liegt.
+function googleKontoVon(termin) {
+  return (termin && ((termin.organizer && termin.organizer.email) || (termin.creator && termin.creator.email))) || "";
+}
 function merkeGoogleTermin(lieferungId, termin) {
   const alle = googleTermine();
-  if (termin) alle[lieferungId] = { id: termin.id, link: termin.htmlLink };
+  if (termin) alle[lieferungId] = { id: termin.id, link: termin.htmlLink, konto: googleKontoVon(termin) };
   else delete alle[lieferungId];
   try { localStorage.setItem("google_termine", JSON.stringify(alle)); } catch (e) {}
 }
 
 // Macht aus dem normalen Termin-Link (nur ansehen) den Link, der den Termin gleich in der
 // Bearbeiten-Ansicht von Google Kalender öffnet (Uhrzeit, Farbe usw. ändern -> Speichern/Fertig).
-function googleBearbeitenLink(link) {
+// Mit "authuser" öffnet Google das richtige Konto, auch wenn auf dem Handy mehrere Google-Konten angemeldet sind.
+function googleBearbeitenLink(link, konto) {
   const treffer = /[?&]eid=([^&#]+)/.exec(link || "");
-  return treffer ? `https://calendar.google.com/calendar/u/0/r/eventedit/${treffer[1]}` : link;
+  if (!treffer) return link;
+  return konto
+    ? `https://calendar.google.com/calendar/r/eventedit/${treffer[1]}?authuser=${encodeURIComponent(konto)}`
+    : `https://calendar.google.com/calendar/u/0/r/eventedit/${treffer[1]}`;
 }
 
 async function googleKalenderApi(token, pfad, optionen = {}) {
@@ -594,8 +602,22 @@ async function kalenderOeffnen(id) {
     alert("Eintrag konnte nicht im Kalender gespeichert werden." + (letzterGoogleFehler ? "\n\nGrund: " + letzterGoogleFehler : ""));
     return;
   }
-  if (fenster && termin.htmlLink) fenster.location.href = googleBearbeitenLink(termin.htmlLink);
-  render(); // der Button wird jetzt zum Link "✓ Im Kalender"
+  if (!termin.htmlLink) {
+    render();
+    alert("Der Termin wurde im Google Kalender angelegt.");
+    return;
+  }
+  const link = googleBearbeitenLink(termin.htmlLink, googleKontoVon(termin));
+  if (fenster) {
+    fenster.location.href = link;
+    render(); // der Button wird jetzt zum Link "✓ Im Kalender"
+    return;
+  }
+  // Das Fenster ließ sich nicht sofort öffnen (z. B. war der Google-Zugang abgelaufen und musste erst
+  // erneuert werden, oder das iPhone blockiert es). Dann kommt ein Dialog mit einem Button: ein echter
+  // Fingertipp darf das Fenster immer öffnen.
+  render();
+  openDialog({ type: "kalenderFertig", link });
 }
 
 /* ======================= Firebase ======================= */
@@ -1090,8 +1112,8 @@ function renderLieferungen() {
               <p class="text-xs text-[#6b4a30]">${eur(l.preisProM3)}/m³${l.lieferpreis > 0 ? ` · +${eur(l.lieferpreis)} Lieferung` : ""} · <span class="font-semibold">${eur(l.gesamtpreis)}</span></p>
             </div>
             <div class="flex gap-2">
-              ${termin && termin.link
-                ? `<a href="${esc(googleBearbeitenLink(termin.link))}" target="_blank" rel="noopener noreferrer" class="text-xs flex items-center gap-1 bg-[#3e6b3e]/10 text-[#3e6b3e] border border-[#3e6b3e]/30 rounded-full px-2.5 py-1.5">✓ Im Kalender</a>`
+              ${termin && termin.link && termin.konto !== undefined
+                ? `<a href="${esc(googleBearbeitenLink(termin.link, termin.konto))}" target="_blank" rel="noopener noreferrer" class="text-xs flex items-center gap-1 bg-[#3e6b3e]/10 text-[#3e6b3e] border border-[#3e6b3e]/30 rounded-full px-2.5 py-1.5">✓ Im Kalender</a>`
                 : `<button onclick="kalenderOeffnen('${l.id}')" ${kalenderBusy === l.id ? "disabled" : ""} class="text-xs flex items-center gap-1 bg-[#2b1d13] text-[#e8ddc3] rounded-full px-2.5 py-1.5 disabled:opacity-40">${kalenderBusy === l.id ? "…" : "📅 Kalender"}</button>`}
               <button onclick="lieferungBearbeiten('${l.id}')" class="text-xs flex items-center gap-1 border border-[#2b1d13]/20 text-[#4a3626] rounded-full px-2.5 py-1.5">✎ Bearbeiten</button>
               <button onclick="lieferungLoeschen('${l.id}')" class="text-[#a62f2f] p-1.5">🗑</button>
@@ -1185,6 +1207,14 @@ function renderDialog() {
       <label class="text-sm text-[#4a3626] block mb-2">Länge</label>
       <div class="grid grid-cols-4 gap-2 mb-4">${LAENGEN.map(laengeBtn).join("")}</div>
       <button onclick="bestaetigeEinlagern()" class="w-full bg-[#c96f3e] text-[#2b1d13] rounded-lg py-3 text-sm font-medium">${dialog.modus === "abziehen" ? "Abziehen" : "Einlagern"}</button>`;
+  }
+
+  if (dialog.type === "kalenderFertig") {
+    titel = "Termin im Kalender";
+    body = `
+      <p class="text-sm text-[#4a3626] mb-4">Der Termin ist in deinem Google Kalender angelegt (vorerst 09:00–10:00). Zum Ändern von Uhrzeit, Farbe oder Notizen jetzt in Google Kalender öffnen und dort auf „Fertig“ bzw. „Speichern“ tippen.</p>
+      <a href="${esc(dialog.link)}" target="_blank" rel="noopener noreferrer" onclick="setTimeout(closeDialog, 400)" class="block w-full text-center bg-[#c96f3e] text-[#2b1d13] rounded-lg py-3 text-sm font-medium">↗ In Google Kalender öffnen</a>
+      <button onclick="closeDialog()" class="w-full mt-2 text-sm text-[#6b4a30] py-2" style="background:transparent;border:0">Später</button>`;
   }
 
   if (dialog.type === "preis") {
